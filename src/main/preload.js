@@ -66,6 +66,8 @@ contextBridge.exposeInMainWorld('zeroinfer', {
     run: (payload) => call('tasks.run', payload),
     stop: () => call('tasks.stop'),
     status: () => call('tasks.status'),
+    loaded: () => call('tasks.loaded'),
+    unload: (modelId) => call('tasks.unload', { modelId }),
 
     // Synchronous: the first render needs to know whether the runtime is
     // installed before any promise can resolve. Reads a cache in the main
@@ -96,6 +98,7 @@ contextBridge.exposeInMainWorld('zeroinfer', {
   },
 
   chats: {
+    export: () => ipcRenderer.invoke('zeroinfer:exportSessions'),
     list: () => call('chats.list'),
     get: (id) => call('chats.get', { id }),
     save: (chat) => call('chats.save', { chat }),
@@ -130,6 +133,9 @@ contextBridge.exposeInMainWorld('zeroinfer', {
   },
 
   app: {
+    copyText: (text) => ipcRenderer.invoke('zeroinfer:copyText', text),
+    loginSettings: () => ipcRenderer.invoke('zeroinfer:loginSettings'),
+    setLoginSettings: (enabled) => ipcRenderer.invoke('zeroinfer:setLoginSettings', enabled),
     version: () => ipcRenderer.invoke('zeroinfer:app.version'),
     openExternal: (url) => ipcRenderer.invoke('zeroinfer:openExternal', url),
   },

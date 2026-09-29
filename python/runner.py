@@ -52,6 +52,7 @@ import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -61,7 +62,6 @@ from engine import ENGINE, DownloadCancelled, actionable_error  # noqa: E402
 from services import hf_service as hf  # noqa: E402
 from services import hw_service  # noqa: E402
 from services import store_service as store  # noqa: E402
-from services.appdata import installs_file, write_json  # noqa: E402
 from services.events import HUB  # noqa: E402
 
 # --- the wire ----------------------------------------------------------------
@@ -154,7 +154,9 @@ def _install_phases(accelerator: str):
     torch_pkgs = ["torch>=2.6", "torchvision", "torchaudio>=2.6"]
     install = _installer()
     label, index = _torch_index(accelerator)
-    torch_cmd = install + (["--index-url", index] if index else []) + torch_pkgs
+    # A CPU wheel already satisfies torch>=2.6; reinstall to actually switch
+    # to the selected index rather than silently keeping the existing build.
+    torch_cmd = install + ["--force-reinstall"] + (["--index-url", index] if index else []) + torch_pkgs
     return [
         (f"Installing PyTorch ({label})", torch_cmd),
         ("Installing transformers, diffusers and supporting libraries", install + _INFERENCE_PKGS),
@@ -208,9 +210,31 @@ def _storage_size(key: str) -> dict:
     return out
 
 
+@contextmanager
+def _cache_maintenance():
+    if not _INFERENCE_LOCK.acquire(blocking=False):
+        raise RuntimeError('Stop the running inference before removing model files.')
+    try:
+        if not ENGINE.cache_lock.acquire(blocking=False):
+            raise RuntimeError('Wait for model downloads to finish before removing model files.')
+        try:
+            yield
+        finally:
+            ENGINE.cache_lock.release()
+    finally:
+        _INFERENCE_LOCK.release()
+
+
 def _clear_hf_cache() -> dict:
+    with _cache_maintenance():
+        ENGINE.unload()
+        return _clear_hf_cache_files()
+
+
+def _clear_hf_cache_files() -> dict:
     removed, freed, errors = 0, 0, []
-    for root in hf._cache_roots():
+    roots = hf._cache_roots()
+    for root in roots:
         if not root.exists():
             continue
         for child in root.iterdir():
@@ -222,20 +246,22 @@ def _clear_hf_cache() -> dict:
                     freed += b
                 except Exception as e:
                     errors.append(str(e))
-    try:
-        write_json(installs_file(), {})
-    except Exception:
-        pass
+    # Preserve library entries whose files could not be removed.
+    for mid in store.list_installed():
+        cache_name = 'models--' + mid.replace('/', '--')
+        if not any((root / cache_name).exists() for root in roots):
+            store.uninstall(mid)
     _SIZE_CACHE.pop("hfCache", None)
     HUB.publish("hf:installsChanged")
-    return {"ok": True, "removed": removed, "bytes": freed, "errors": errors}
+    return {"ok": not errors, "removed": removed, "bytes": freed, "errors": errors,
+            "error": '; '.join(errors) if errors else None}
 
 
 # --- long-running operations -------------------------------------------------
 
 def _op_run(rid, p):
-    _STOP.clear()
     with _INFERENCE_LOCK:
+        _STOP.clear()
         try:
             output = ENGINE.run(p.get("modelId"), p.get("task"), p.get("input") or {}, p.get("params") or {})
             return {"ok": True, "output": output}
@@ -395,6 +421,15 @@ def _op_stop(rid, p):
     return {"ok": True}
 
 
+def _op_unload(rid, p):
+    if not _INFERENCE_LOCK.acquire(blocking=False):
+        return {'ok': False, 'error': 'Wait for the current inference to finish before unloading models.'}
+    try:
+        return {'ok': True, 'unloaded': ENGINE.unload(p.get('modelId'))}
+    finally:
+        _INFERENCE_LOCK.release()
+
+
 def _op_cancel_download(rid, p):
     ev = _ACTIVE_DOWNLOADS.get(p.get("modelId"))
     if ev is None:
@@ -407,13 +442,14 @@ def _op_uninstall(rid, p):
     mid = p.get("id")
     if not hf.is_valid_model_id(mid):
         return {"ok": False, "error": "Invalid model id"}
-    try:
+    with _cache_maintenance():
         ENGINE.unload(mid)
-    except Exception:
-        pass
-    store.uninstall(mid)
-    cache = hf.delete_model_cache(mid)
-    return {"ok": True, "removed": cache.get("removed", []), "errors": cache.get("errors", [])}
+        cache = hf.delete_model_cache(mid)
+        errors = cache.get('errors', [])
+        if not errors:
+            store.uninstall(mid)
+        return {"ok": not errors, "removed": cache.get("removed", []), "errors": errors,
+                "error": '; '.join(str(e) for e in errors) if errors else None}
 
 
 def _op_mark_installed(rid, p):
@@ -440,16 +476,19 @@ def _api_port() -> int:
 def _op_api_start(rid, p):
     SERVER, default_port = _api()
     port = int(p.get("port") or _api_port() or default_port)
+    if not 1024 <= port <= 65535:
+        raise ValueError('Choose an API port between 1024 and 65535.')
     res = SERVER.start(port)
     if res.get("running"):
-        store.save_settings({"apiEnabled": True, "apiPort": port})
+        store.save_settings({"apiEnabled": True, "apiPort": res['port']})
     return res
 
 
 def _op_api_stop(rid, p):
     SERVER, _ = _api()
     res = SERVER.stop()
-    store.save_settings({"apiEnabled": False})
+    if not res.get('running') and not res.get('error'):
+        store.save_settings({"apiEnabled": False})
     return res
 
 
@@ -457,6 +496,7 @@ def _op_api_status(rid, p):
     SERVER, _ = _api()
     st = SERVER.status()
     st["enabled"] = bool((store.get_settings() or {}).get("apiEnabled"))
+    st['port'] = st.get('port') or _api_port()
     return st
 
 
@@ -490,6 +530,8 @@ OPS = {
     "tasks.run":          _op_run,
     "tasks.stop":         _op_stop,
     "tasks.status":       lambda rid, p: runtime.probe_status(),
+    "tasks.loaded":       lambda rid, p: {'models': ENGINE.loaded_model_ids()},
+    "tasks.unload":       _op_unload,
     "tasks.setup":        _op_setup,
     "tasks.download":     _op_download,
     "tasks.cancelDownload": _op_cancel_download,
@@ -509,6 +551,7 @@ OPS = {
     "hf.verifyToken":     lambda rid, p: hf.verify_token(p.get("token") or ""),
 
     "chats.list":         lambda rid, p: store.list_chats(),
+    "chats.export":       lambda rid, p: store.export_chats(),
     "chats.get":          lambda rid, p: store.get_chat(p.get("id")),
     "chats.save":         lambda rid, p: {"ok": store.save_chat(p.get("chat") or {})},
     "chats.patch":        lambda rid, p: {"ok": store.patch_chat(p.get("id"), p.get("patch") or {})},
@@ -633,4 +676,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 3 and sys.argv[1] == '--setup':
+        _dispatch({'id': 'setup', 'type': 'tasks.setup', 'payload': {'accelerator': sys.argv[2]}})
+    else:
+        main()

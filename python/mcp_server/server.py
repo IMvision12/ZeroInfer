@@ -5,7 +5,7 @@ engine embed) as MCP tools: detection, segmentation, transcription, speech,
 image generation, text generation, embeddings, plus model discovery/install.
 
 Requires the ZeroInfer desktop app to be running with its API switched on:
-Settings -> API & MCP -> enable the local API server. The API is off by default -
+Settings -> Apps & integrations -> enable the local API server. The API is off by default -
 it is the one thing ZeroInfer deliberately exposes, so it is opt-in - and with it
 off there is nothing on port 11500 for these tools to talk to.
 
@@ -38,7 +38,7 @@ from mcp_server.client import DEFAULT_URL, ZeroInferClient, ZeroInferError
 INSTRUCTIONS = """Runs Hugging Face models locally through ZeroInfer.
 
 Requires the ZeroInfer desktop app to be running with its local API enabled
-(Settings -> API & MCP). The API is off by default, so this is the first thing
+(Settings -> Apps & integrations). The API is off by default, so this is the first thing
 to check. Call `zeroinfer_status` if a tool fails - it reports whether the API is
 reachable and which inference stack is installed.
 

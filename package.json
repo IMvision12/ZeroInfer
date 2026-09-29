@@ -16,6 +16,9 @@
     "url": "https://github.com/ZeroAIx/ZeroInfer.git"
   },
   "scripts": {
+    "test": "node --test scripts/test-core.cjs",
+    "test:python": "python -B -m unittest discover -s python/tests -v",
+    "test:ui": "npm run build:renderer && node scripts/run-ui-tests.cjs",
     "gen:archs": "python python/_generate_supported_architectures.py",
     "check:archs": "python python/_generate_supported_architectures.py --check",
     "build:renderer": "node scripts/build-renderer.js",

@@ -95,10 +95,19 @@ def load_embedder(model_id: str):
     return emb
 
 
-def evict(model_id: str) -> bool:
+def loaded_model_ids() -> list[str]:
+    with _CACHE_LOCK:
+        return list(_CACHE)
+
+
+def evict(model_id: str | None) -> bool:
     """Drop a cached embedder so its weights can be freed. Returns True if one
     was present."""
     with _CACHE_LOCK:
+        if model_id is None:
+            had_models = bool(_CACHE)
+            _CACHE.clear()
+            return had_models
         return _CACHE.pop(model_id, None) is not None
 
 

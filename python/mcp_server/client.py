@@ -48,7 +48,7 @@ class ZeroInferClient:
         return ZeroInferError(
             f"Can't reach ZeroInfer at {self.base_url} ({type(e).__name__}).\n\n"
             "The local API is probably switched off - it is opt-in. Open the "
-            "ZeroInfer app and turn it on under Settings -> API & MCP, then retry. "
+            "ZeroInfer app and turn it on under Settings -> Apps & integrations, then retry. "
             "If the app is not running, start it first.\n\n"
             "(If your API listens elsewhere, point this server at it with --url, "
             "or the ZEROINFER_URL environment variable.)"

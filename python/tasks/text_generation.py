@@ -14,6 +14,27 @@ import re
 from .base import TaskHandler, TaskVariant, LoadedPipeline
 import output_kinds as ok
 
+def _conversation(inputs):
+    messages = inputs.get("messages")
+    if isinstance(messages, list):
+        valid = [dict(role=m["role"], content=m["content"]) for m in messages
+                 if isinstance(m, dict) and m.get("role") in ("system", "user", "assistant")
+                 and isinstance(m.get("content"), str)]
+        if valid:
+            return valid
+    return [{"role": "user", "content": inputs["text"].strip()}]
+
+
+def _chat_prompt(state, inputs):
+    messages = _conversation(inputs)
+    try:
+        return state.pipe.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    except Exception:
+        if len(messages) == 1:
+            return messages[0]["content"]
+        return "\n\n".join(f"{m['role']}: {m['content']}" for m in messages) + "\n\nassistant:"
+
+
 def _is_chat_model(info):
     arch = " ".join(info.get("architectures") or []).lower()
     tags = " ".join(info.get("tags") or []).lower()
@@ -29,21 +50,16 @@ class ReasoningVariant(TaskVariant):
     name = "reasoning-think-parse"
 
     def can_handle(self, info, inputs):
-        return (inputs.get("text") or "").strip() and _is_reasoning_model(info) and _is_chat_model(info)
+        return (inputs.get("text") or "").strip() and _is_reasoning_model(info) and (_is_chat_model(info) or bool(inputs.get("messages")))
 
     def run(self, state, inputs, params):
-        text = inputs["text"].strip()
-        try:
-            tokenizer = state.pipe.tokenizer
-            prompt = tokenizer.apply_chat_template(
-                [{"role": "user", "content": text}], tokenize=False, add_generation_prompt=True,
-            )
-        except Exception:
-            prompt = text
+        prompt = _chat_prompt(state, inputs)
         kwargs = {k: params[k] for k in ("max_new_tokens", "temperature", "top_p", "top_k", "do_sample") if k in params}
         kwargs.setdefault("max_new_tokens", 512)
         raw = state.pipe(prompt, **kwargs)
         out = (raw[0] if isinstance(raw, list) else raw).get("generated_text") or ""
+        if out.startswith(prompt):
+            out = out[len(prompt):].lstrip()
         answer = re.sub(r"<think>.*?</think>\s*", "", out, flags=re.DOTALL).strip()
         return ok.text(answer or out)
 
@@ -52,17 +68,10 @@ class ChatTemplateVariant(TaskVariant):
     name = "chat-template"
 
     def can_handle(self, info, inputs):
-        return bool((inputs.get("text") or "").strip()) and _is_chat_model(info)
+        return bool((inputs.get("text") or "").strip()) and (_is_chat_model(info) or bool(inputs.get("messages")))
 
     def run(self, state, inputs, params):
-        text = inputs["text"].strip()
-        try:
-            tokenizer = state.pipe.tokenizer
-            prompt = tokenizer.apply_chat_template(
-                [{"role": "user", "content": text}], tokenize=False, add_generation_prompt=True,
-            )
-        except Exception:
-            prompt = text
+        prompt = _chat_prompt(state, inputs)
         kwargs = {k: params[k] for k in ("max_new_tokens", "temperature", "top_p", "top_k", "do_sample") if k in params}
         kwargs.setdefault("max_new_tokens", 256)
         raw = state.pipe(prompt, **kwargs)

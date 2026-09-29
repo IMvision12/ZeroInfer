@@ -6,6 +6,18 @@ registry parts of `services/huggingface.js`. Same validation and merge rules.
 from __future__ import annotations
 
 import time
+import threading
+from functools import wraps
+
+_STORE_LOCK = threading.RLock()
+
+
+def _serialized(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with _STORE_LOCK:
+            return fn(*args, **kwargs)
+    return wrapped
 
 from services.appdata import (
     chats_dir, chat_file, settings_file, installs_file,
@@ -66,6 +78,7 @@ def get_chat(cid: str):
         return None
     return read_json(chat_file(cid), None)
 
+@_serialized
 def save_chat(chat: dict) -> bool:
     if not chat or not is_valid_chat_id(chat.get("id")):
         raise ValueError("chat.id required")
@@ -81,6 +94,7 @@ def save_chat(chat: dict) -> bool:
     HUB.publish("chats:updated")
     return True
 
+@_serialized
 def patch_chat(cid: str, patch: dict) -> bool:
     if not is_valid_chat_id(cid):
         raise ValueError("invalid chat id")
@@ -97,6 +111,7 @@ def patch_chat(cid: str, patch: dict) -> bool:
     HUB.publish("chats:updated")
     return True
 
+@_serialized
 def delete_chat(cid: str) -> bool:
     if not is_valid_chat_id(cid):
         return False
@@ -110,7 +125,30 @@ def delete_chat(cid: str) -> bool:
 def get_settings() -> dict:
     return read_json(settings_file(), {}) or {}
 
+@_serialized
 def save_settings(patch: dict) -> dict:
+    if not isinstance(patch, dict):
+        raise ValueError('Settings must be an object')
+    for key in ('reduceMotion', 'showHardware', 'sendOnEnter', 'personalizationEnabled', 'welcomeSeen', 'apiEnabled'):
+        if key in patch and not isinstance(patch[key], bool):
+            raise ValueError(f'{key} must be true or false')
+    for key, maximum in (('nickname', 80), ('customInstructions', 4000)):
+        if key in patch and (not isinstance(patch[key], str) or len(patch[key]) > maximum):
+            raise ValueError(f'{key} must be text with at most {maximum} characters')
+    for key, choices in {
+        'theme': ('system', 'dark', 'light', 'nord', 'dracula', 'tokyo', 'catppuccin', 'gruvbox', 'onedark'),
+        'textSize': ('small', 'default', 'large'),
+        'responseStyle': ('default', 'concise', 'friendly', 'technical'),
+    }.items():
+        if key in patch and patch[key] not in choices:
+            raise ValueError(f'Invalid {key}')
+    for key, low, high in (('apiPort', 1024, 65535), ('maxNewTokens', 16, 8192), ('temperature', 0, 2)):
+        if key in patch:
+            value = patch[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
+                raise ValueError(f'{key} must be between {low} and {high}')
+            if key != 'temperature' and int(value) != value:
+                raise ValueError(f'{key} must be a whole number')
     cur = get_settings()
     nxt = {**cur, **(patch or {})}
     write_json(settings_file(), nxt)
@@ -119,6 +157,7 @@ def save_settings(patch: dict) -> dict:
 def list_installed() -> dict:
     return read_json(installs_file(), {}) or {}
 
+@_serialized
 def mark_installed(model_id: str, meta: dict | None = None) -> bool:
     cur = list_installed()
     cur[model_id] = {**(meta or {}), "installedAt": _now_ms()}
@@ -126,9 +165,20 @@ def mark_installed(model_id: str, meta: dict | None = None) -> bool:
     HUB.publish("hf:installsChanged")
     return True
 
+@_serialized
 def uninstall(model_id: str) -> dict:
     cur = list_installed()
     cur.pop(model_id, None)
     write_json(installs_file(), cur)
     HUB.publish("hf:installsChanged")
     return {"ok": True}
+
+
+@_serialized
+def export_chats() -> dict:
+    sessions = []
+    for item in list_chats():
+        chat = get_chat(item.get('id'))
+        if chat:
+            sessions.append(chat)
+    return {'format': 'zeroinfer-sessions', 'version': 1, 'exportedAt': _now_ms(), 'sessions': sessions}

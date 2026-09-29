@@ -100,6 +100,34 @@ class PythonRunner {
   }
 
   /** Spawn the engine. Resolves when it reports `ready`. */
+  installRuntime(options, onProgress) {
+    // A fresh interpreter has no torch DLLs open. This matters when replacing
+    // CPU/CUDA packages on Windows after the main engine has loaded a model.
+    return new Promise((resolve, reject) => {
+      let terminal = null;
+      const errors = [];
+      const proc = spawn(this.pythonPath, ['-u', path.join(this.pythonDir, 'runner.py'), '--setup', options.accelerator || 'cpu'], {
+        cwd: this.pythonDir, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONPATH: this.pythonDir,
+          ZEROINFER_DATA_DIR: this.dataDir, UV_CACHE_DIR: uvCacheDir(this.dataDir) },
+      });
+      this.setupProc = proc;
+      readline.createInterface({ input: proc.stdout }).on('line', line => {
+        try { const frame = JSON.parse(line);
+          if (frame.progress) onProgress?.(frame.progress);
+          else if (frame.id === 'setup') terminal = frame;
+        } catch { /* installer output is diagnostic only */ }
+      });
+      readline.createInterface({ input: proc.stderr }).on('line', line => { errors.push(line); if (errors.length > 15) errors.shift(); });
+      proc.once('error', reject);
+      proc.once('close', code => {
+        if (this.setupProc === proc) this.setupProc = null;
+        if (terminal?.ok) resolve(terminal.result);
+        else reject(new Error(terminal?.error || `Runtime installer exited (${code}). ${errors.join('\n')}`));
+      });
+    });
+  }
+
   start() {
     if (this.suspended) return Promise.reject(new Error(this.suspended));
     // Park behind the gate, then try again - by which time the engine is back up
@@ -176,6 +204,7 @@ class PythonRunner {
       const mine = this.proc;
       this.proc.on('exit', (code) => {
         clearTimeout(ready);
+        reject(new Error(`The Python engine exited before it was ready (code ${code}).\n${this.stderr.slice(-10).join('\n')}`));
         if (this.gate) {
           // We killed it on purpose and another engine is coming. The caller is
           // still holding a promise; hand their request to the next one.
@@ -194,6 +223,7 @@ class PythonRunner {
           this.starting = null;
         }
       });
+      this.proc.stdin.on('error', (e) => this._failAllPending(`Could not reach the Python engine: ${e.message}`));
     }).finally(() => { this.starting = null; });
 
     return this.starting;
@@ -318,14 +348,23 @@ class PythonRunner {
     const proc = this.proc;
     this.stop();
     if (!proc || proc.exitCode !== null) return;
-    await new Promise((resolve) => {
+    await new Promise((resolve, reject) => {
       const done = () => { clearTimeout(timer); resolve(); };
-      const timer = setTimeout(done, timeoutMs);
+      const timer = setTimeout(() => {
+        proc.removeListener('exit', done);
+        reject(new Error('The inference engine did not stop. Restart ZeroInfer before changing the runtime.'));
+      }, timeoutMs);
       proc.once('exit', done);
     });
   }
 
   stop() {
+    if (this.setupProc) {
+      const installer = this.setupProc;
+      this.setupProc = null;
+      if (process.platform === 'win32') spawn('taskkill', ['/pid', String(installer.pid), '/T', '/F'], { windowsHide: true });
+      else installer.kill('SIGTERM');
+    }
     const proc = this.proc;
     this.proc = null;
     if (!proc || proc.exitCode !== null) return;

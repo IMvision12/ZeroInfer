@@ -71,6 +71,7 @@ function createTray({ onOpen, onQuit, isRunning }) {
   };
 
   rebuild();
+  app.on('zeroinfer:login-changed', rebuild);
   tray.on('double-click', onOpen);
   // Left-click opens on Windows/Linux, where a click isn't expected to just show
   // the menu the way it is on macOS.

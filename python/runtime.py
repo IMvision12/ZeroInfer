@@ -13,7 +13,7 @@ either front-end: it lives here, and it is a single `threading.Lock`, because
 that is the only kind both worlds can honour.
 
 `INFERENCE_LOCK` is an async *view* onto that one lock. `async with
-INFERENCE_LOCK` acquires it on a worker thread, so an API request waits for a UI
+INFERENCE_LOCK` polls it without blocking, so an API request waits for a UI
 inference (and vice versa) without ever blocking uvicorn's event loop. Getting
 this wrong is subtle and nasty: two independent locks would look completely
 correct, pass every test that exercises one path at a time, and then produce
@@ -43,8 +43,9 @@ class _AsyncLockView:
         self._lock = lock
 
     async def __aenter__(self):
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._lock.acquire)
+        # A cancelled executor acquisition could later take the lock forever.
+        while not self._lock.acquire(blocking=False):
+            await asyncio.sleep(0.02)
         return self
 
     async def __aexit__(self, *_exc):
@@ -77,9 +78,22 @@ def stop_requested() -> bool:
 
 
 async def run_blocking(fn, *args, **kwargs):
-    """Run a blocking engine call in the default threadpool."""
+    """Wait for native work even on cancellation, before releasing its lock."""
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
+    future = loop.run_in_executor(None, lambda: fn(*args, **kwargs))
+    cancelled = False
+    while not future.done():
+        try:
+            await asyncio.shield(future)
+        except asyncio.CancelledError:
+            cancelled = True
+        except Exception:
+            break
+    if cancelled:
+        # Retrieve any worker exception before propagating request cancellation.
+        future.exception()
+        raise asyncio.CancelledError
+    return future.result()
 
 
 # --- runtime probing ---------------------------------------------------------

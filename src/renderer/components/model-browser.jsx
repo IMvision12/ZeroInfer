@@ -150,7 +150,7 @@ function ModelHub({ hw, onOpenModel, onOpenSettings, defaultInstalled = false, r
   const [installed, setInstalled] = useStateMB({});
   const [downloads, setDownloads] = useStateMB({});
   const [sizeMap, setSizeMap] = useStateMB({}); 
-  const dlTimers = useRefMB({});
+  const activeDownloadRequests = useRefMB(new Map());
 
   const refreshInstalled = async () => {
     try { setInstalled((await window.zeroinfer.hf.installed()) || {}); } catch {}
@@ -290,16 +290,10 @@ function ModelHub({ hw, onOpenModel, onOpenSettings, defaultInstalled = false, r
       try {
         if (showInstalled) {
           const inst = (await window.zeroinfer.hf.installed()) || {};
-          const ids = Object.keys(inst);
-          const collected = [];
-          for (const id of ids) {
-            const sub = await window.zeroinfer.hf.search(id.split('/').pop(), null);
-            if (Array.isArray(sub)) {
-              const match = sub.find(m => m.id === id);
-              if (match) collected.push({ ...match, installed: true });
-              else collected.push({ id, nm: id.split('/').pop(), path: id, task: inst[id]?.task, size: inst[id]?.size, installed: true });
-            }
-          }
+          const queryText = debouncedQuery.trim().toLowerCase();
+          const collected = Object.entries(inst)
+            .map(([id, meta]) => ({ ...meta, id, nm: meta.nm || id.split('/').pop(), path: id, installed: true }))
+            .filter(m => `${m.id} ${m.nm} ${m.task || ''}`.toLowerCase().includes(queryText));
           if (!cancelled) setResults(collected);
         } else {
           const sel = HUB_TASKS.find(t => t.id === tab);
@@ -380,10 +374,13 @@ function ModelHub({ hw, onOpenModel, onOpenSettings, defaultInstalled = false, r
   }, [results]);
 
   const startDownload = async (m) => {
-    if (downloads[m.id]) return;
+    if (activeDownloadRequests.current.has(m.id)) return;
+    const request = { cancelled: false };
+    activeDownloadRequests.current.set(m.id, request);
     setDownloads(d => ({ ...d, [m.id]: { status: 'downloading', size: m.size } }));
     try {
       const res = await window.zeroinfer.tasks.download(m.id);
+      if (request.cancelled) return;
       if (!res?.ok) {
         const msg = res?.error || 'download failed';
 
@@ -396,22 +393,30 @@ function ModelHub({ hw, onOpenModel, onOpenSettings, defaultInstalled = false, r
       await refreshInstalled();
       setDownloads(d => { const rest = { ...d }; delete rest[m.id]; return rest; });
     } catch (e) {
+      if (request.cancelled) return;
       setDownloads(d => d[m.id]
         ? { ...d, [m.id]: { status: 'error', error: String(e?.message || e) } }
         : d);
+    } finally {
+      activeDownloadRequests.current.delete(m.id);
     }
   };
   const cancelDownload = async (id) => {
-
+    const request = activeDownloadRequests.current.get(id);
+    if (request) request.cancelled = true;
     setDownloads(d => { const rest = { ...d }; delete rest[id]; return rest; });
-
-
-
-    try { await window.zeroinfer?.tasks.cancelDownload(id); } catch {}
+    if (request) {
+      try { await window.zeroinfer?.tasks.cancelDownload(id); }
+      catch (e) { setErr(`Could not cancel download: ${e.message || e}`); }
+    }
   };
   const uninstall = async (id) => {
-    await window.zeroinfer.hf.uninstall(id);
-    refreshInstalled();
+    try {
+      const result = await window.zeroinfer.hf.uninstall(id);
+      if (result?.ok === false) throw new Error(result.error || 'Could not remove model');
+      await refreshInstalled();
+      setResults(prev => prev.filter(m => m.id !== id));
+    } catch (e) { setErr(e.message || String(e)); }
   };
 
   const installedCount = Object.keys(installed).length;
@@ -504,7 +509,6 @@ function ModelHub({ hw, onOpenModel, onOpenSettings, defaultInstalled = false, r
                     const pct = hasPct ? Math.max(0, Math.min(100, dl.pct)) : null;
                     const onRowClick = () => {
                       if (dl && !error) return;          
-                      if (error) { cancelDownload(m.id); startDownload(m); return; }
                       startDownload(m);
                     };
                     return (
@@ -637,7 +641,7 @@ function ModelHub({ hw, onOpenModel, onOpenSettings, defaultInstalled = false, r
                       <GatedTokenPrompt
                         modelId={id}
                         onOpenSettings={onOpenSettings}
-                        onRetry={() => { cancelDownload(id); startDownload(m); }}
+                        onRetry={() => startDownload(m)}
                       />
                     )}
                   </div>
@@ -680,7 +684,7 @@ function ModelHub({ hw, onOpenModel, onOpenSettings, defaultInstalled = false, r
                 onInstall={() => startDownload(m)}
                 onUninstall={() => uninstall(m.id)}
                 onOpen={() => onOpenModel && onOpenModel(m.id)}
-                downloading={!!downloads[m.id]}
+                downloading={downloads[m.id]?.status === 'downloading'}
                 dlPct={downloads[m.id]?.pct}
                 dlDone={downloads[m.id]?.done}
                 dlTotal={downloads[m.id]?.total}

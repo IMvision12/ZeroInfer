@@ -47,7 +47,7 @@ function JanusModeBar({ value, onChange }) {
   );
 }
 
-function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved }) {
+function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved, preferences = ZeroPreferences.defaults }) {
   const [chat, setChat] = useStateCH(null);
   const [input, setInput] = useStateCH('');
   const [atts, setAtts] = useStateCH([]);
@@ -74,7 +74,10 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved }) {
     let cancelled = false;
     (async () => {
       if (!sessionId) return;
-      const c = await window.zeroinfer.chats.get(sessionId);
+      let c;
+      try { c = await window.zeroinfer.chats.get(sessionId); }
+      catch (e) { if (!cancelled) setError(e.message); return; }
+      if (!c && !cancelled) setError('This session could not be found. Open a model to start a new session.');
       if (cancelled || !c) return;
 
       const healed = (c.messages || []).map(m =>
@@ -84,7 +87,9 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved }) {
       );
       const changed = healed.some((m, i) => m !== (c.messages || [])[i]);
       const loaded = { ...c, messages: healed };
-      if (changed) window.zeroinfer.chats.save(loaded).catch(() => {});
+      if (changed) window.zeroinfer.chats.save(loaded).catch(e => {
+        if (!cancelled) setError(`Could not save recovered conversation: ${e.message || e}`);
+      });
       setChat(loaded);
     })();
     return () => { cancelled = true; };
@@ -98,7 +103,7 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved }) {
     if (inputRef.current) inputRef.current.focus();
   }, [sessionId]);
 
-  if (!chat) return <div className="chat-view"><div className="chat-empty">Loading…</div></div>;
+  if (!chat) return <div className="chat-view"><div className="chat-empty" role={error ? 'alert' : 'status'}>{error || 'Loading conversation…'}</div></div>;
 
   const send = async () => {
     const text = input.trim();
@@ -137,7 +142,7 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved }) {
       model: modelId,
     };
     const nextMsgs = [...chat.messages, userMsg, asstMsg];
-    const baseTitle = chat.title && chat.title !== 'New chat'
+    const baseTitle = chat.messages.length > 0 && chat.title && chat.title !== 'New chat'
       ? chat.title
       : titleFromFirstMessage(text, atts);
     const nextChat = {
@@ -148,10 +153,15 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved }) {
       sub: `${modelId.split('/').pop()} · ${nextMsgs.length} msgs`,
       messages: nextMsgs,
     };
+    try { await window.zeroinfer.chats.save(nextChat); }
+    catch (e) {
+      setError(`Could not save your message: ${e.message || e}`);
+      setSending(false);
+      return;
+    }
     setChat(nextChat);
     setInput('');
     setAtts([]);
-    try { await window.zeroinfer.chats.save(nextChat); } catch {}
     onSaved && onSaved(nextChat);
 
 
@@ -166,44 +176,52 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved }) {
       }
     }
     const task = modelMeta?.task || (isVLM ? 'image-text-to-text' : 'text-generation');
+    const messages = ZeroPreferences.chatMessages(chat.messages, text, preferences);
+    const params = { max_new_tokens: preferences.maxNewTokens, do_sample: preferences.temperature > 0,
+      ...(preferences.temperature > 0 ? { temperature: preferences.temperature } : {}),
+      ...(isJanus ? { janus_mode: janusMode } : {}) };
     const payload = {
       task,
       modelId,
       input: {
-        text,
+        // Vision adapters consume text directly; include the conversation in that
+        // prompt. Text generators receive structured roles for their chat template.
+        text: isVLM && !isGenerate ? messages.map(m => `${m.role}: ${m.content}`).join('\n\n') : text,
+        ...(!isVLM && !isGenerate ? { messages } : {}),
         ...(imageAtt ? { dataUrl: imageAtt.dataUrl } : {}),
       },
-      ...(isJanus ? { params: { janus_mode: janusMode } } : {}),
+      params,
     };
 
     const res = await window.zeroinfer.tasks.run(payload).catch(e => ({ ok: false, error: String(e?.message || e) }));
 
-    const patchAssistant = (patch) => {
-      setChat(prev => {
-        if (!prev) return prev;
-        const msgs = prev.messages.map(m => m.id === asstId ? { ...m, ...patch, streaming: false } : m);
-        const done = { ...prev, messages: msgs };
-        window.zeroinfer.chats.save(done).catch(() => {});
+    const patchAssistant = async (patch) => {
+      const done = { ...nextChat, messages: nextChat.messages.map(m =>
+        m.id === asstId ? { ...m, ...patch, streaming: false } : m) };
+      setChat(done);
+      try {
+        await window.zeroinfer.chats.save(done);
         onSaved && onSaved(done);
-        return done;
-      });
+      } catch (e) {
+        setError(`Reply is visible here but could not be saved: ${e.message || e}`);
+      }
     };
 
     if (res?.ok) {
       const out = res.output || {};
       if (out.kind === 'image' && out.dataUrl) {
-        patchAssistant({ text: '', image: out.dataUrl });
+        await patchAssistant({ text: '', image: out.dataUrl });
       } else if (out.kind === 'text') {
-        patchAssistant({ text: out.text || '(empty reply)' });
+        await patchAssistant({ text: out.text || '(empty reply)' });
       } else {
-        patchAssistant({ text: JSON.stringify(out) });
+        await patchAssistant({ text: JSON.stringify(out) });
       }
     } else if (stoppedByUserRef.current) {
-      patchAssistant({ text: 'Stopped by user.', cancelled: true });
+      await patchAssistant({ text: 'Stopped by user.', cancelled: true });
     } else {
       const errMsg = res?.error || 'inference failed';
-      patchAssistant({ text: errMsg, error: true });
       setError(errMsg);
+      await patchAssistant({ text: errMsg, error: true });
     }
     stoppedByUserRef.current = false;
     setSending(false);
@@ -211,14 +229,18 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved }) {
   };
 
   const attachImage = async () => {
-    const att = await window.zeroinfer.dialog.openImage();
-    if (att) setAtts(a => [...a, att]);
+    try {
+      const att = await window.zeroinfer.dialog.openImage();
+      if (att) setAtts(a => [...a, att]);
+    } catch (e) { setError(`Could not attach image: ${e.message || e}`); }
   };
   const removeAtt = (i) => setAtts(a => a.filter((_, idx) => idx !== i));
 
   const onKeyDown = (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); }
-    else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    if (e.isComposing || e.nativeEvent?.isComposing) return;
+    if (e.key === 'Enter' && !e.shiftKey && (preferences.sendOnEnter || e.ctrlKey || e.metaKey)) {
+      e.preventDefault(); send();
+    }
   };
 
   const visibleMessages = chat.messages.filter(m => m.role !== 'system');
@@ -303,7 +325,7 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved }) {
           >
             {sending
               ? (stopping ? 'Stopping…' : <><Icon name="x" size={11}/> Stop</>)
-              : <>Send <span className="cc-kbd">⌘↵</span></>}
+              : <>Send <span className="cc-kbd">{preferences.sendOnEnter ? '↵' : /Mac/.test(navigator.platform) ? '⌘↵' : 'Ctrl ↵'}</span></>}
           </button>
         </div>
       </div>

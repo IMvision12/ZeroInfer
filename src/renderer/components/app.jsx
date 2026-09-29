@@ -17,7 +17,8 @@ function App() {
   const [view, setView] = useState('hub'); 
   const [activeSession, setActiveSession] = useState(null);
   const [theme, setTheme] = useState(TWEAK_DEFAULTS.theme);
-  const [tweaksOpen, setTweaksOpen] = useState(false);
+  const [preferences, setPreferences] = useState(() => ZeroPreferences.normalize());
+  const [appError, setAppError] = useState('');
   const [recentsOpen, setRecentsOpen] = useState(true);
   const [hubInstalledMode, setHubInstalledMode] = useState(false);
   const [sessions, setSessions] = useState([]);
@@ -52,9 +53,12 @@ function App() {
           window.zeroinfer?.settings.get(),
           window.zeroinfer?.app.version(),
         ]);
-        if (settings?.theme) setTheme(settings.theme);
+        const next = ZeroPreferences.normalize(settings);
+        setPreferences(next);
+        setTheme(next.theme);
+        setWelcome(!settings?.welcomeSeen);
         if (v) setVersion(v);
-      } catch {}
+      } catch (e) { setAppError('Could not load preferences: ' + e.message); }
       setBootReady(true);
     })();
   }, []);
@@ -185,36 +189,28 @@ function App() {
     };
   }, []);
 
+  const setupGuard = React.useRef(false);
   const runPySetup = async (opts) => {
-
+    if (setupGuard.current) return;
+    setupGuard.current = true;
     setPySetup({ running: true, log: [], step: 'Starting…', error: null });
-    const res = await window.zeroinfer?.tasks.setup(opts);
-    if (res?.ok) {
-      setPySetup(prev => ({ ...(prev || {}), running: false, done: true, step: 'Ready' }));
-
-
-
-      const accel = opts?.accelerator;
-      setPyStatus(prev => ({
-        ...(prev || {}),
-        ready: true,
-        runtimeInstalled: true,
-        activeAccelerator: accel || prev?.activeAccelerator,
-        installedAccelerator: accel || prev?.installedAccelerator,
-        accelerators: {
-          ...(prev?.accelerators || {}),
-          ...(accel ? { [accel]: { installed: true, installedAt: new Date().toISOString() } } : {}),
-        },
-      }));
-      refreshPyStatus();
-    } else {
-      setPySetup(prev => ({ ...(prev || { log: [] }), running: false, error: res?.error || 'setup failed' }));
-    }
+    try {
+      const res = await window.zeroinfer.tasks.setup(opts);
+      if (!res?.ok) throw new Error(res?.error || 'Runtime installation failed.');
+      setPySetup(prev => ({ ...prev, running: false, done: true, step: 'Ready' }));
+      await refreshPyStatus();
+    } catch (e) {
+      setPySetup(prev => ({ ...prev, running: false, done: false, error: e.message || String(e) }));
+    } finally { setupGuard.current = false; }
   };
 
-
-
-
+  const savePreferences = async patch => {
+    const result = await window.zeroinfer.settings.save(patch);
+    if (!result || result.ok === false) throw new Error(result?.error || 'Preferences could not be saved.');
+    const next = ZeroPreferences.normalize(result);
+    setPreferences(next); setTheme(next.theme);
+    return next;
+  };
 
   useEffect(() => {
     const onStart  = (e) => setUpdatingTo(e.detail?.version || 'latest');
@@ -228,36 +224,29 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const themeClasses = ['light', 'theme-nord', 'theme-dracula', 'theme-tokyo', 'theme-catppuccin', 'theme-gruvbox', 'theme-onedark'];
-    document.body.classList.remove(...themeClasses);
-    if (theme === 'light')           document.body.classList.add('light');
-    else if (theme === 'nord')       document.body.classList.add('theme-nord');
-    else if (theme === 'dracula')    document.body.classList.add('theme-dracula');
-    else if (theme === 'tokyo')      document.body.classList.add('theme-tokyo');
-    else if (theme === 'catppuccin') document.body.classList.add('theme-catppuccin');
-    else if (theme === 'gruvbox')    document.body.classList.add('theme-gruvbox');
-    else if (theme === 'onedark')    document.body.classList.add('theme-onedark');
-
-    window.zeroinfer?.settings.save({ theme }).catch(() => {});
+    const media = window.matchMedia('(prefers-color-scheme: light)');
+    const apply = () => {
+      document.body.classList.remove('light', ...ZeroPreferences.themes.filter(t => !['dark', 'light', 'system'].includes(t)).map(t => 'theme-' + t));
+      const selected = theme === 'system' ? (media.matches ? 'light' : 'dark') : theme;
+      if (selected === 'light') document.body.classList.add('light');
+      else if (selected !== 'dark') document.body.classList.add('theme-' + selected);
+      document.body.style.colorScheme = selected === 'light' ? 'light' : 'dark';
+    };
+    apply(); media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
   }, [theme]);
 
   useEffect(() => {
-    const handler = (e) => {
-      if (!e.data) return;
-      if (e.data.type === '__activate_edit_mode') setTweaksOpen(true);
-      if (e.data.type === '__deactivate_edit_mode') setTweaksOpen(false);
-    };
-    window.addEventListener('message', handler);
-    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
-    return () => window.removeEventListener('message', handler);
-  }, []);
+    document.body.classList.toggle('reduce-motion', preferences.reduceMotion);
+    document.body.dataset.textSize = preferences.textSize;
+  }, [preferences.reduceMotion, preferences.textSize]);
 
   useEffect(() => {
     const onKey = (e) => {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
-        const input = document.querySelector('.side-search input');
+        const input = document.querySelector('.hub-search input');
         if (input) input.focus();
       }
     };
@@ -273,9 +262,9 @@ function App() {
     const alreadyInstalled = pyStatus?.ready || pyStatus?.runtimeInstalled;
     if (!alreadyInstalled) setOnboard(true);
     setWelcome(false);
+    savePreferences({ welcomeSeen: true }).catch(e => setAppError(e.message));
   };
   const finishOnboard = () => setOnboard(false);
-  const setTheme_ = (t) => { setTheme(t); window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { theme: t } }, '*'); };
 
   const openHub = () => {
     setView('hub');
@@ -302,7 +291,8 @@ function App() {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    try { await window.zeroinfer.chats.save(session); } catch {}
+    try { await window.zeroinfer.chats.save(session); }
+    catch (e) { setAppError('Could not create a session: ' + e.message); return; }
     if (fresh) setInstalledModels(fresh);
     await reloadSessions();
     setView('session');
@@ -324,7 +314,7 @@ function App() {
       return <ModelHub hw={hw} onOpenModel={startSessionWithModel} onOpenSettings={openSettings} defaultInstalled={hubInstalledMode} resetSignal={hubResetSignal}/>;
     }
     if (view === 'session' && activeSessionObj) {
-      return renderWorkspace(activeSessionObj, installedModels, () => {});
+      return renderWorkspace(activeSessionObj, installedModels, () => {}, preferences);
     }
     return (
       <Landing
@@ -337,21 +327,22 @@ function App() {
   return (
     <div className="win">
       <div className="win-frame">
-        <div className="app-body">
+        <div className="app-body" inert={settingsOpen ? "" : undefined}>
           <aside className="sidebar">
+            <button className="sidebar-brand" onClick={openHub} aria-label="ZeroInfer home"><Logo size={30}/><span>ZeroInfer<small>Your local AI workspace</small></span></button>
             <div className="side-section" style={{paddingTop:12}}>
               <button
                 className={`new-chat-btn ${view === 'hub' && !hubInstalledMode ? 'active' : ''}`}
                 onClick={openHub}
               >
-                <Icon name="home" size={14}/> Home
+                <Icon name="search" size={17}/> Discover models
               </button>
               <button
                 className={`new-chat-btn ${view === 'hub' && hubInstalledMode ? 'active' : ''}`}
                 onClick={openHubInstalled}
                 style={{marginTop: 4}}
               >
-                <Icon name="plus" size={14}/> Installed only
+                <Icon name="cube" size={17}/> My models
               </button>
             </div>
             <div className="side-section side-flex">
@@ -362,7 +353,7 @@ function App() {
                 aria-expanded={recentsOpen}
               >
                 <Icon name="chevron" size={11} className={`side-label-caret ${recentsOpen ? 'open' : ''}`}/>
-                <span>Recents</span>
+                <span>Recent sessions</span>
               </button>
               {recentsOpen && (
               <div className="side-chats">
@@ -421,11 +412,11 @@ function App() {
                   <span>Update · v{String(updateInfo.latestVersion || '').replace(/^v/i, '')}</span>
                 </button>
               )}
-              <div className="side-stats mono" title={hw?.gpu?.model || ''}>
+              {preferences.showHardware && <div className="side-stats mono" title={hw?.gpu?.model || ''}>
                 {sbGpu(hw) && <span>GPU {sbGpu(hw)}</span>}
                 <span>RAM {sbRam(hw)}</span>
                 <span>CPU {sbCpu(hw)}</span>
-              </div>
+              </div>}
               <button className="new-chat-btn" onClick={() => openSettings()} title="Settings">
                 <Icon name="settings" size={14}/> Settings
               </button>
@@ -434,7 +425,7 @@ function App() {
           </aside>
 
           <main className="main">
-            {renderMain()}
+            {appError && <div className="app-notice" role="alert">{appError}<button aria-label="Dismiss error" onClick={() => setAppError('')}><Icon name="x" size={14}/></button></div>}{renderMain()}
           </main>
         </div>
 
@@ -452,8 +443,8 @@ function App() {
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
           initialSection={settingsSection}
-          theme={theme}
-          setTheme={setTheme_}
+          preferences={preferences}
+          onSavePreferences={savePreferences}
           version={version}
           hw={hw}
           pyStatus={pyStatus}
@@ -465,22 +456,12 @@ function App() {
         {updatingTo && <UpdatingOverlay version={updatingTo}/>}
       </div>
 
-      {tweaksOpen && (
-        <div className="tweaks">
-          <span className="lbl">Theme</span>
-          <div className="tweaks-toggle">
-            <button className={theme === 'dark' ? 'active' : ''} onClick={() => setTheme_('dark')}><Icon name="moon" size={11}/>Dark</button>
-            <button className={theme === 'light' ? 'active' : ''} onClick={() => setTheme_('light')}><Icon name="sun" size={11}/>Light</button>
-          </div>
-          <div style={{width:1,height:16,background:'var(--line)'}}/>
-          <button className="hp-chip" onClick={() => { setWelcome(true); }}>Replay welcome</button>
-        </div>
-      )}
+
     </div>
   );
 }
 
-function renderWorkspace(session, installedModels, onSaved) {
+function renderWorkspace(session, installedModels, onSaved, preferences) {
   const modelId = session.modelId || session.model;
   const installedMeta = (modelId && installedModels[modelId]) || null;
 
@@ -495,6 +476,7 @@ function renderWorkspace(session, installedModels, onSaved) {
   if (CHAT_TASKS.has(task) && !isFlorence) {
     return (
       <ChatWorkspace
+        preferences={preferences}
         key={session.id}
         sessionId={session.id}
         modelId={modelId}
@@ -585,12 +567,13 @@ function ramLabel(hw) {
 }
 function sbRam(hw) {
   if (!hw?.mem?.total) return '- GB';
-  return `${(hw.mem.used / (1024 ** 3)).toFixed(2)} / ${(hw.mem.total / (1024 ** 3)).toFixed(2)} GB`;
+  const used = Number.isFinite(hw.mem.used) ? hw.mem.used : Number.isFinite(hw.mem.free) ? hw.mem.total - hw.mem.free : null;
+  return `${used == null ? '—' : (used / (1024 ** 3)).toFixed(1)} / ${(hw.mem.total / (1024 ** 3)).toFixed(1)} GB`;
 }
 function sbCpu(hw) {
   const v = hw?.cpu?.load;
-  if (typeof v !== 'number') return '- %';
-  return `${v.toFixed(2)} %`;
+  if (!Number.isFinite(v)) return '—';
+  return `${v.toFixed(0)}%`;
 }
 
 function sbGpu(hw) {
@@ -793,31 +776,18 @@ function UpdatingOverlay({ version }) {
 }
 
 function ConfirmDialog({ open, title, message, confirmLabel = 'OK', cancelLabel = 'Cancel', danger = false, onConfirm, onCancel }) {
-  const { useEffect, useRef } = React;
-  const confirmRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onCancel && onCancel(); }
-      if (e.key === 'Enter')  { e.stopPropagation(); onConfirm && onConfirm(); }
-    };
-    window.addEventListener('keydown', onKey, true);
-
-    setTimeout(() => confirmRef.current?.focus(), 0);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [open, onCancel, onConfirm]);
+  const dialogRef = React.useRef(null);
+  useDialogFocus(dialogRef, open, onCancel);
 
   if (!open) return null;
   return (
     <div className="confirm-modal" onClick={onCancel}>
-      <div className="confirm-card" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} className="confirm-card" role="alertdialog" aria-modal="true" aria-label={title} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
         {title && <div className="confirm-title">{title}</div>}
         <div className="confirm-message">{message}</div>
         <div className="confirm-actions">
           <button className="mc-btn ghost" onClick={onCancel}>{cancelLabel}</button>
           <button
-            ref={confirmRef}
             className={`mc-btn ${danger ? 'danger' : 'primary'}`}
             onClick={onConfirm}
           >
@@ -829,4 +799,4 @@ function ConfirmDialog({ open, title, message, confirmLabel = 'OK', cancelLabel 
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+ReactDOM.createRoot(document.getElementById('root')).render(<AppErrorBoundary><App/></AppErrorBoundary>);

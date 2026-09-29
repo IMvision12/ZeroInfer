@@ -14,7 +14,7 @@
  */
 'use strict';
 
-const { app, ipcMain, dialog, shell } = require('electron');
+const { app, ipcMain, dialog, shell, clipboard } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -55,7 +55,7 @@ async function rmDirWithRetry(dir, attempts = 12) {
 // Keeping it an explicit list means a hole in the UI can't reach an op the UI
 // was never meant to have.
 const ALLOWED = new Set([
-  'tasks.run', 'tasks.stop', 'tasks.status', 'tasks.cancelDownload',
+  'tasks.run', 'tasks.stop', 'tasks.status', 'tasks.cancelDownload', 'tasks.loaded', 'tasks.unload',
   'hf.search', 'hf.installed', 'hf.markInstalled', 'hf.uninstall', 'hf.modelInfo',
   'hf.getToken', 'hf.setToken', 'hf.clearToken', 'hf.verifyToken',
   'chats.list', 'chats.get', 'chats.save', 'chats.patch', 'chats.delete',
@@ -74,6 +74,34 @@ const BROADCASTS = ['hw:update', 'chats:updated', 'hf:installsChanged'];
 let lastStatus = { ready: false, runtimeInstalled: false, sidecarRunning: false };
 
 function registerIpc({ runner, getWin }) {
+  let setupBusy = false;
+  const loginSettings = () => ({
+    supported: app.isPackaged && ['win32', 'darwin'].includes(process.platform),
+    enabled: ['win32', 'darwin'].includes(process.platform) ? app.getLoginItemSettings().openAtLogin : false,
+  });
+  ipcMain.handle('zeroinfer:loginSettings', loginSettings);
+  ipcMain.handle('zeroinfer:setLoginSettings', (_e, enabled) => {
+    if (!loginSettings().supported) throw new Error('Launch at login requires an installed Windows or macOS app.');
+    if (typeof enabled !== 'boolean') throw new Error('Invalid login setting.');
+    app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: true, args: ['--hidden'] });
+    app.emit('zeroinfer:login-changed');
+    return loginSettings();
+  });
+  ipcMain.handle('zeroinfer:copyText', (_e, text) => {
+    if (typeof text !== 'string' || text.length > 1000000) throw new Error('Invalid clipboard text.');
+    clipboard.writeText(text);
+    return { ok: true };
+  });
+  ipcMain.handle('zeroinfer:exportSessions', async () => {
+    const result = await dialog.showSaveDialog(getWin(), {
+      title: 'Export ZeroInfer sessions', defaultPath: 'zeroinfer-sessions.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: true, cancelled: true };
+    const data = await runner.call('chats.export');
+    await fs.promises.writeFile(result.filePath, JSON.stringify(data, null, 2), 'utf8');
+    return { ok: true };
+  });
   const send = (channel, payload) => {
     const win = getWin();
     if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -111,15 +139,24 @@ function registerIpc({ runner, getWin }) {
   });
 
   ipcMain.handle('zeroinfer:setup', async (_e, opts) => {
+    if (setupBusy || clearing) return { ok: false, error: 'A runtime operation is already running.' };
+    if (opts?.accelerator && !['cpu', 'gpu'].includes(opts.accelerator)) return { ok: false, error: 'Unknown accelerator.' };
+    setupBusy = true;
+    runner.hold();
     try {
-      const res = await runner.call('tasks.setup', opts || {},
+      await runner.stopAndWait();
+      const res = await runner.installRuntime(opts || {},
         (p) => send('zeroinfer:progress', { kind: 'setup', data: p }));
       // The inference stack just changed underneath us; make sure the next
       // statusSync tells the truth instead of the pre-install answer.
-      try { lastStatus = await runner.call('tasks.status', {}); } catch { /* non-fatal */ }
       return res;
     } catch (e) {
       return { ok: false, error: String((e && e.message) || e) };
+    } finally {
+      runner.release();
+      try { await runner.start(); lastStatus = await runner.call('tasks.status', {}); }
+      catch { lastStatus = { ready: false, runtimeInstalled: false, sidecarRunning: false }; }
+      setupBusy = false;
     }
   });
 
@@ -194,7 +231,7 @@ function registerIpc({ runner, getWin }) {
     // Never twice at once. A second pass would tear packages out from under the
     // first one mid-uninstall and leave the environment in pieces. The UI guards
     // this too, but the guard belongs where the damage happens.
-    if (clearing) return { ok: false, error: 'The runtime is already being removed.' };
+    if (clearing || setupBusy) return { ok: false, error: 'A runtime operation is already running.' };
     clearing = true;
 
     const userData = app.getPath('userData');

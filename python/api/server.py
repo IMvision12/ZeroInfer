@@ -143,6 +143,7 @@ class APIServer:
         self._thread = None
         self._port = None
         self._error = None
+        self._lifecycle_lock = threading.RLock()
 
     @property
     def running(self) -> bool:
@@ -161,13 +162,22 @@ class APIServer:
         }
 
     def start(self, port: int = DEFAULT_PORT) -> dict:
+        with self._lifecycle_lock:
+            return self._start(port)
+
+    def _start(self, port: int) -> dict:
         if self.running:
             return self.status()
+        if self._thread and self._thread.is_alive():
+            return {**self.status(), 'error': 'The API is still starting or stopping. Try again shortly.'}
 
         import uvicorn
 
         self._error = None
         self._port = int(port or DEFAULT_PORT)
+        if not 1024 <= self._port <= 65535:
+            self._error = 'Choose an API port between 1024 and 65535.'
+            return self.status()
 
         config = uvicorn.Config(
             create_app(),
@@ -180,12 +190,13 @@ class APIServer:
             access_log=False,
         )
         self._server = uvicorn.Server(config)
+        server = self._server
 
         def serve():
             try:
-                asyncio.run(self._server.serve())
-            except Exception as e:                      # port in use is the common one
-                self._error = str(e)
+                asyncio.run(server.serve())
+            except (Exception, SystemExit) as e:
+                self._error = f'Could not start the API on port {self._port}. The port may be in use. {e}'
 
         self._thread = threading.Thread(target=serve, name="api-server", daemon=True)
         self._thread.start()
@@ -197,19 +208,30 @@ class APIServer:
                 break
             threading.Event().wait(0.1)
 
-        if self._error:
+        if not self.running and not self._error:
+            self._error = 'The API did not finish starting. Try again shortly.'
+            server.should_exit = True
+        if self._error and not self._thread.is_alive():
             self._server = None
             self._port = None
         return self.status()
 
     def stop(self) -> dict:
+        with self._lifecycle_lock:
+            return self._stop()
+
+    def _stop(self) -> dict:
         if self._server:
             self._server.should_exit = True
         if self._thread:
             self._thread.join(timeout=5)
+            if self._thread.is_alive():
+                self._error = 'The API is finishing active requests. Try stopping it again shortly.'
+                return self.status()
         self._server = None
         self._thread = None
         self._port = None
+        self._error = None
         return self.status()
 
 

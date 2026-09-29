@@ -263,19 +263,21 @@ function HFTokenCard() {
   const [status, setStatus] = useStateOB(null); 
 
   const refresh = async () => {
-    try { setMasked(await window.zeroinfer?.hf.getToken()); } catch {}
+    try { setMasked(await window.zeroinfer.hf.getToken()); }
+    catch (e) { setStatus({ ok: false, error: e.message || String(e) }); }
   };
   useEffectOB(() => { refresh(); }, []);
 
   const save = async () => {
     const token = input.trim();
-    if (!token) return;
+    if (!token || busy) return;
     setBusy(true);
     setStatus(null);
     try {
       const v = await window.zeroinfer?.hf.verifyToken(token);
       if (!v?.ok) { setStatus({ ok: false, error: v?.error || 'verification failed' }); setBusy(false); return; }
-      await window.zeroinfer?.hf.setToken(token);
+      const result = await window.zeroinfer.hf.setToken(token);
+      if (result?.ok === false) throw new Error(result.error || 'The token could not be saved.');
       setStatus({ ok: true, user: v.user });
       setInput('');
       await refresh();
@@ -286,12 +288,14 @@ function HFTokenCard() {
   };
 
   const clear = async () => {
+    if (busy) return;
     setBusy(true);
     try {
-      await window.zeroinfer?.hf.clearToken();
+      const result = await window.zeroinfer.hf.clearToken();
+      if (result?.ok === false) throw new Error(result.error || 'The token could not be removed.');
       setMasked(null);
       setStatus(null);
-    } catch {}
+    } catch (e) { setStatus({ ok: false, error: e.message || String(e) }); }
     setBusy(false);
   };
 
@@ -307,21 +311,24 @@ function HFTokenCard() {
               : 'Optional. Required to download gated models (Llama, Gemma, some Qwen/DeepSeek).'}
           </div>
         </div>
-        <a className="hub-link" onClick={() => window.zeroinfer?.app.openExternal('https://huggingface.co/settings/tokens')}>
+        <button className="hub-link" onClick={() => window.zeroinfer?.app.openExternal('https://huggingface.co/settings/tokens')}>
           Get a token
-        </a>
+        </button>
       </div>
 
       <div className="hf-token-row">
         <input
           className="hf-token-input mono"
+          aria-label="Hugging Face access token"
+          autoComplete="off"
+          spellCheck={false}
           type={show ? 'text' : 'password'}
           value={input}
           placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
         />
-        <button className="tb-btn" onClick={() => setShow(v => !v)} title={show ? 'Hide' : 'Show'}>
+        <button className="tb-btn" onClick={() => setShow(v => !v)} aria-label={show ? 'Hide token' : 'Show token'} title={show ? 'Hide' : 'Show'}>
           <Icon name={show ? 'eye_off' : 'eye'} size={12}/>
         </button>
         <button className="mc-btn primary" disabled={busy || !input.trim()} onClick={save}>

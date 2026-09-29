@@ -37,6 +37,9 @@ class Engine:
         self._adapter_cache: dict = {}
         self._current_llm_id: str | None = None
         self._log = _default_log
+        # Explicit downloads and cache maintenance must never touch the same
+        # files concurrently. Implicit model loads are covered by inference lock.
+        self.cache_lock = threading.Lock()
 
     def _get_adapter(self, info: dict):
         model_id = info["model_id"]
@@ -89,8 +92,12 @@ class Engine:
         return self._current_llm_id
 
     def loaded_model_ids(self) -> list[str]:
+        from embedding_backend import loaded_model_ids
         seen = []
-        for (_cls, model_id) in self._adapter_cache.keys():
+        for (_cls, model_id) in list(self._adapter_cache):
+            if model_id not in seen:
+                seen.append(model_id)
+        for model_id in loaded_model_ids():
             if model_id not in seen:
                 seen.append(model_id)
         return seen
@@ -128,10 +135,18 @@ class Engine:
                     pass
             if self._current_llm_id == k[1]:
                 self._current_llm_id = None
+        from embedding_backend import evict
+        evict(model_id)
         _empty_torch_cache()
         return len(keys)
 
     def download(self, model_id: str, on_progress=None, cancel_event: "threading.Event | None" = None) -> dict:
+        with self.cache_lock:
+            if cancel_event is not None and cancel_event.is_set():
+                raise DownloadCancelled()
+            return self._download(model_id, on_progress, cancel_event)
+
+    def _download(self, model_id: str, on_progress=None, cancel_event=None) -> dict:
         """Run `snapshot_download`, streaming byte-level progress via the
         `on_progress(dict)` callback. Picks exactly one weight format so multi-
         format repos don't download 4× the bytes. Raises DownloadCancelled if
@@ -309,7 +324,7 @@ def actionable_error(e: Exception) -> str:
     )
     if is_gated:
         return ("This model is gated or private - it requires a Hugging Face access token. "
-                "Open Settings → HF Token, paste a token from "
+                "Open Settings → Hugging Face, paste a token from "
                 "https://huggingface.co/settings/tokens (Read access is enough), then retry.")
     if "no module named" in lower:
         mod = msg.split("'")[1] if "'" in msg else "unknown"

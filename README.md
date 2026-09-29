@@ -84,7 +84,7 @@ nothing else; a browser pointed at it gets a 404.
 
 ## OpenAI-compatible API
 
-Off by default. Turn it on in **Settings → API & MCP**, and ZeroInfer serves an
+Off by default. Turn it on in **Settings → Apps & integrations**, and ZeroInfer serves an
 OpenAI-compatible API on `http://localhost:11500/v1` (any api key). It routes to
 whichever LLM is loaded, or lazy-loads the one you name.
 
@@ -111,10 +111,25 @@ stays up with the window closed.
 
 ## MCP server
 
-Gives Claude direct access to your local models. It's an HTTP client of the API
+Gives ChatGPT desktop, Codex, Claude Code, and Claude Desktop access to your local models. It's an HTTP client of the API
 above, so **turn the API on first**.
 
-Copy the exact command from **Settings → API & MCP**, or:
+Open **Settings → Apps & integrations**, enable the local API, and choose your
+client. The UI provides paths for your installation and copyable setup fields.
+
+For **ChatGPT desktop**, local MCP servers are available to the Codex host. Open
+a Codex chat, then **Settings → MCP servers → Add server**, choose **STDIO**, and
+copy the Name, Command, and Argument fields from ZeroInfer. Save the server,
+select **Restart**, and use `/mcp` in the Codex chat to check the connection. A
+normal ChatGPT chat does not expose local Codex MCP configuration; use a remote
+MCP app or secure tunnel there. See the [official desktop MCP guide](https://learn.chatgpt.com/docs/extend/mcp).
+
+The launcher reads ZeroInfer's saved API port at startup. If you change the port,
+restart the MCP server in your client. An explicit `ZEROINFER_URL` environment
+variable or `--url` argument takes precedence. Keep ZeroInfer running with the
+API enabled; install the inference runtime before running model tools.
+
+For Claude Code, copy the generated command or use:
 
 ```powershell
 # Windows
@@ -140,6 +155,26 @@ you use them.
 The app checks GitHub Releases and updates itself from Settings. Updates replace
 the app only - your models and the installed PyTorch stack are left alone, so a
 UI fix never costs you a 2 GB re-download.
+
+## Settings
+
+Settings has a persistent sidebar and a separate scrollable content area:
+
+- **General:** appearance, system theme, text size, reduced motion, keyboard
+  behavior, hardware monitor, launch at login, and updates.
+- **Personalization:** response style, custom instructions, nickname, token
+  limit, and temperature. These are applied to local chat requests together with
+  conversation history; individual models may follow instructions differently.
+- **Apps & integrations:** local API status and port, plus MCP client setup.
+- **Runtime & hardware:** CPU/CUDA installation or repair, loaded model unloading,
+  and device information. macOS uses its Metal-capable runtime.
+- **Data controls:** export sessions, inspect disk use, and remove model caches
+  or inference packages with confirmation.
+- **Hugging Face:** manage and verify a token for gated or private models.
+
+Appearance and personalization use **Save changes**. Closing with unsaved edits
+offers a discard confirmation. API, runtime, token, and storage actions apply
+immediately and report failures in their section.
 
 ## Uninstall
 
@@ -187,6 +222,19 @@ UI doesn't have it.
 npm install
 npm start            # build the renderer + launch the app
 ```
+
+Regression checks (no model downloads or changes to personal app data):
+
+```bash
+npm test             # preferences, MCP launcher, and Python bridge
+npm run test:python  # storage, API lifecycle, concurrency, and real MCP stdio
+npm run test:ui      # isolated Electron UI flows and screenshots
+```
+
+The Python tests need `fastapi`, `uvicorn`, `psutil`, `huggingface_hub`, and `mcp`
+in the selected Python environment. UI tests use a fixture bridge; real model
+inference, GPU runtime installation, signed installers, and connection from the
+actual ChatGPT desktop client still need release testing on supported systems.
 
 Useful pieces:
 

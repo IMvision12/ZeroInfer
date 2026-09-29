@@ -1,782 +1,138 @@
 const { useState: useStateS, useEffect: useEffectS } = React;
 
-function Settings({
-  open,
-  onClose,
-  initialSection,
-  theme,
-  setTheme,
-  version,
-  hw,
-  pyStatus,
-  pySetup,
-  runSetup,
-  refreshPyStatus,
-  resetPySetup,
-}) {
-  const [section, setSection] = useStateS(initialSection || 'general');
+const SETTINGS_SECTIONS = [
+  { id: 'general', label: 'General', icon: 'settings', description: 'Make ZeroInfer feel at home on your desktop.' },
+  { id: 'personalization', label: 'Personalization', icon: 'pencil', description: 'Choose how your local chat models respond.' },
+  { id: 'api', label: 'Apps & integrations', icon: 'layers', description: 'Connect your local models to the tools you use.' },
+  { id: 'hardware', label: 'Runtime & hardware', icon: 'cpu', description: 'Manage the engine that runs your models.' },
+  { id: 'data', label: 'Data controls', icon: 'folder', description: 'Your sessions, model downloads, and local storage.' },
+  { id: 'hf', label: 'Hugging Face', icon: 'lock', description: 'Access private and gated models with your account.' },
+];
 
-
-  useEffectS(() => {
-    if (open && initialSection) setSection(initialSection);
-  }, [open, initialSection]);
-
-  useEffectS(() => {
+function Settings({ open, onClose, initialSection, preferences, onSavePreferences, version, hw,
+  pyStatus, pySetup, runSetup, refreshPyStatus, resetPySetup }) {
+  const [section, setSection] = React.useState('general');
+  const [draft, setDraft] = React.useState(() => ZeroPreferences.normalize(preferences));
+  const [saved, setSaved] = React.useState(() => ZeroPreferences.normalize(preferences));
+  const [saving, setSaving] = React.useState(false);
+  const [maintenance, setMaintenance] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [notice, setNotice] = React.useState('');
+  const [discard, setDiscard] = React.useState(false);
+  const dialog = React.useRef(null);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
+  const close = () => { if (saving || maintenance) return; if (dirty) setDiscard(true); else onClose(); };
+  useDialogFocus(dialog, open, close);
+  React.useEffect(() => {
     if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') onClose && onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  const sections = [
-    { id: 'general',    label: 'General',       icon: 'settings' },
-    { id: 'appearance', label: 'Appearance',    icon: 'image' },
-    { id: 'hardware',   label: 'Hardware',      icon: 'cpu' },
-    { id: 'api',        label: 'API & MCP',     icon: 'zap' },
-    { id: 'hf',         label: 'HF Token',      icon: 'cube' },
-  ];
-  const active = sections.find(s => s.id === section) || sections[0];
-
-  return (
-    <div className="settings-modal" onClick={onClose}>
-      <div className="settings-card" onClick={(e) => e.stopPropagation()}>
-        <aside className="settings-nav">
-          <div className="settings-nav-title">Settings</div>
-          {sections.map(s => (
-            <button
-              key={s.id}
-              className={`settings-nav-item ${section === s.id ? 'active' : ''}`}
-              onClick={() => setSection(s.id)}
-            >
-              <Icon name={s.icon} size={15}/>
-              <span>{s.label}</span>
-            </button>
-          ))}
-        </aside>
-
-        <div className="settings-content">
-          <div className="settings-header">
-            <h2>{active.label}</h2>
-            <button className="settings-close" onClick={onClose} title="Close (Esc)">
-              <Icon name="close" size={14}/>
-            </button>
-          </div>
-
-          <div className="settings-body">
-            {section === 'general'    && <GeneralSection    version={version} hw={hw} pyStatus={pyStatus} refreshPyStatus={refreshPyStatus} resetPySetup={resetPySetup}/>}
-            {section === 'appearance' && <AppearanceSection theme={theme} setTheme={setTheme}/>}
-            {section === 'hardware'   && <HardwareSection   hw={hw} pyStatus={pyStatus} pySetup={pySetup} runSetup={runSetup} refreshPyStatus={refreshPyStatus}/>}
-            {section === 'api'        && <ApiSection/>}
-            {section === 'hf'         && <HFSection/>}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Row({ title, sub, value, control, onClick }) {
-  return (
-    <div className={`s-row ${onClick ? 'clickable' : ''}`} onClick={onClick}>
-      <div className="s-row-l">
-        <div className="s-row-t">{title}</div>
-        {sub && <div className="s-row-s">{sub}</div>}
-      </div>
-      {value && <div className="s-row-v mono">{value}</div>}
-      {control}
-    </div>
-  );
-}
-
-function GeneralSection({ version, hw, pyStatus, refreshPyStatus, resetPySetup }) {
-  const openExternal = (url) => window.zeroinfer?.app?.openExternal?.(url);
-  const [logsPath, setLogsPath] = useStateS('');
-  const [cacheStat, setCacheStat] = useStateS({ bytes: null, files: null, paths: [] });
-  const [runtimeStat, setRuntimeStat] = useStateS({ bytes: null, files: null, paths: [] });
-
-
-
-  const [sizeLoading, setSizeLoading] = useStateS({ hf: true, py: true });
-  const [confirmKey, setConfirmKey] = useStateS(null);
-  const [busy, setBusy] = useStateS(null);
-  const [error, setError] = useStateS(null);
-  // Clearing the runtime tears the venv down and rebuilds the base environment,
-  // which is a download. Show what it's doing rather than a motionless "Clearing…".
-  const [clearStep, setClearStep] = useStateS(null);
-
-
-
-  const refreshSizes = async () => {
-    const MIN_HOLD_MS = 350;
-    const start = performance.now();
-    setSizeLoading({ hf: true, py: true });
-    const settle = async (key, promise) => {
-      try {
-        const res = await promise;
-        if (key === 'hf' && res?.ok) setCacheStat({ bytes: res.bytes, files: res.files, paths: res.paths || [] });
-        if (key === 'py' && res?.ok) setRuntimeStat({ bytes: res.bytes, files: res.files, paths: res.paths || [] });
-      } finally {
-        const elapsed = performance.now() - start;
-        if (elapsed < MIN_HOLD_MS) {
-          await new Promise(r => setTimeout(r, MIN_HOLD_MS - elapsed));
-        }
-        setSizeLoading(s => ({ ...s, [key]: false }));
-      }
-    };
+    const id = initialSection === 'appearance' ? 'general' : initialSection;
+    setSection(SETTINGS_SECTIONS.some(s => s.id === id) ? id : 'general');
+    const next = ZeroPreferences.normalize(preferences);
+    setDraft(next); setSaved(next); setError(''); setNotice(''); setDiscard(false);
+  }, [open, initialSection]);
+  const change = patch => { setDraft(p => ({ ...p, ...patch })); setNotice(''); setError(''); };
+  const save = async () => {
+    if (saving) return;
+    setSaving(true); setError('');
     try {
-      await Promise.all([
-        settle('hf', window.zeroinfer?.storage?.size?.('hfCache')),
-        settle('py', window.zeroinfer?.storage?.size?.('pyRuntime')),
-      ]);
-    } catch {
-      setSizeLoading({ hf: false, py: false });
-    }
+      const tokens = Number(draft.maxNewTokens), temperature = Number(draft.temperature);
+      if (!String(draft.maxNewTokens).trim() || !Number.isInteger(tokens) || tokens < 16 || tokens > 8192)
+        throw new Error('Maximum response tokens must be a whole number between 16 and 8,192.');
+      if (!String(draft.temperature).trim() || !Number.isFinite(temperature) || temperature < 0 || temperature > 2)
+        throw new Error('Temperature must be a number between 0 and 2.');
+      const next = ZeroPreferences.normalize(draft);
+      const patch = Object.fromEntries(Object.entries(next).filter(([key, value]) => value !== saved[key]));
+      await onSavePreferences(patch);
+      setDraft(next); setSaved(next); setNotice('Changes saved.');
+    } catch (e) { setError(e.message || String(e)); }
+    finally { setSaving(false); }
   };
+  if (!open) return null;
+  const active = SETTINGS_SECTIONS.find(s => s.id === section);
+  return <div className="settings-modal" onMouseDown={e => { if (e.target === e.currentTarget) close(); }}>
+    <div ref={dialog} className="settings-card" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1}>
+      <aside className="settings-nav">
+        <div className="settings-nav-top"><button data-autofocus className="settings-close" aria-label="Close settings" onClick={close} disabled={saving || maintenance}><Icon name="x" size={19}/></button><span>Settings</span></div>
+        <nav aria-label="Settings categories">{SETTINGS_SECTIONS.map(s => <button key={s.id}
+          className={`settings-nav-item ${section === s.id ? 'active' : ''}`} aria-label={s.label} title={s.label} aria-current={section === s.id ? 'page' : undefined}
+          disabled={maintenance || saving} onClick={() => { setSection(s.id); setError(''); setNotice(''); }}>
+          <Icon name={s.icon} size={17}/><span>{s.label}</span></button>)}</nav>
+        <div className="settings-nav-footer"><Logo size={24}/><div>ZeroInfer<span>Version {version || '—'}</span></div></div>
+      </aside>
+      <div className="settings-content">
+        <header className="settings-header"><h2 id="settings-title">{active.label}</h2><p>{active.description}</p></header>
+        <div className="settings-body" key={section} inert={saving ? '' : undefined}>
+          {section === 'general' && <GeneralSettings draft={draft} change={change} version={version}/>}
+          {section === 'personalization' && <PersonalizationSettings draft={draft} change={change}/>}
+          {section === 'api' && <IntegrationSettings/>}
+          {section === 'hardware' && <RuntimeSettings hw={hw} pyStatus={pyStatus} pySetup={pySetup} runSetup={runSetup}/>}
+          {section === 'data' && <DataSettings pyStatus={pyStatus} pySetup={pySetup} refreshPyStatus={refreshPyStatus} resetPySetup={resetPySetup} onBusy={setMaintenance}/>}
+          {section === 'hf' && <SettingGroup title="Account access" description="Your token is stored on this computer and used to authenticate requests to Hugging Face."><HFTokenCard/></SettingGroup>}
+        </div>
+        <footer className="settings-footer"><div className="settings-save-status" role={error ? 'alert' : 'status'}>
+          {error || (maintenance ? 'Storage operation in progress…' : dirty ? 'You have unsaved changes' : notice || 'Preferences are stored on this device')}
+        </div>{dirty && <button className="mc-btn ghost" disabled={saving || maintenance} onClick={() => { setDraft(saved); setError(''); }}>Cancel</button>}
+          <button className="mc-btn primary" disabled={!dirty || saving || maintenance} onClick={save}>{saving ? 'Saving…' : 'Save changes'}</button></footer>
+      </div>
+      <ConfirmDialog open={discard} title="Discard unsaved changes?" message="Your changes to preferences have not been saved."
+        confirmLabel="Discard changes" onConfirm={() => { setDiscard(false); onClose(); }} onCancel={() => setDiscard(false)}/>
+    </div>
+  </div>;
+}
 
-  useEffectS(() => {
+function GeneralSettings({ draft, change, version }) {
+  const [startup, setStartup] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState('');
+  React.useEffect(() => {
     let alive = true;
-    (async () => {
-      try {
-        const p = await window.zeroinfer?.logs?.path?.();
-        if (alive && p) setLogsPath(p);
-      } catch {}
-      if (alive) refreshSizes();
-    })();
+    window.zeroinfer.app.loginSettings().then(s => { if (alive) setStartup(s); }).catch(e => { if (alive) setError(e.message); });
     return () => { alive = false; };
   }, []);
-
-
-
-  useEffectS(() => {
-    const off = window.zeroinfer?.hf?.onInstallsChanged?.(() => refreshSizes());
-    return () => { try { off && off(); } catch {} };
-  }, []);
-
-  const viewLogs = async () => {
-    try { await window.zeroinfer?.logs?.view?.(); } catch {}
+  const login = async enabled => {
+    setBusy(true); setError('');
+    try { setStartup(await window.zeroinfer.app.setLoginSettings(enabled)); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
   };
-
-  const doClear = async (key) => {
-    if (busy) return;   // Enter is bound to the dialog's confirm button too
-
-    // Dismiss the dialog *now*, not when the work finishes. Clearing the runtime
-    // takes ~20s; leaving the confirm dialog up for all of it looks like the click
-    // did nothing, and the obvious response - click it again - used to fire a
-    // second concurrent clear that deleted the venv the first one was rebuilding.
-    setConfirmKey(null);
-    setError(null);
-    setBusy(key);
-    setClearStep(null);
-
-    // The removal narrates itself on its own channel. Listen only for the duration
-    // of the clear, so this row doesn't light up during an unrelated install.
-    const off = key === 'py'
-      ? window.zeroinfer?.storage?.onClearProgress?.((evt) => {
-          if (evt?.kind === 'step') setClearStep(evt.text);
-        })
-      : null;
-
-    try {
-      const res = key === 'hf'
-        ? await window.zeroinfer?.storage?.clearHfCache?.()
-        : await window.zeroinfer?.storage?.clearPyRuntime?.();
-      if (!res?.ok) setError(res?.error || 'Clear failed');
-      // The runtime is gone, so the remembered "install succeeded" must go with it.
-      // Onboarding reads that flag, not just pyStatus, and a stale one leaves it
-      // announcing a runtime that is no longer installed.
-      else if (key === 'py') resetPySetup?.();
-    } catch (e) {
-      setError(String(e?.message || e));
-    } finally {
-      try { off && off(); } catch {}
-      setBusy(null);
-      setClearStep(null);
-      await refreshSizes();
-      try { await refreshPyStatus?.(); } catch {}
-    }
-  };
-
-  const fmtBytes = (n) => {
-    if (n == null) return '-';
-    if (n < 1024) return `${n} B`;
-    const u = ['KB', 'MB', 'GB', 'TB'];
-    let v = n / 1024, i = 0;
-    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-    return `${v.toFixed(v >= 100 ? 0 : 1)} ${u[i]}`;
-  };
-
-  return (
-    <div className="s-section">
-      <h3 className="s-h">App Info</h3>
-      <div className="s-card">
-        <Row
-          title="Version"
-          value={`ZeroInfer v${version || '-'}`}
-          control={<UpdateCheckButton currentVersion={version}/>}
-        />
-        <Row title="Platform" value={`${hw?.os?.distro || hw?.os?.platform || '-'} · ${hw?.os?.arch || ''}`.trim()}/>
-      </div>
-
-      <h3 className="s-h">Help & Feedback</h3>
-      <div className="s-card">
-        <Row
-          title="Report bug or send feedback"
-          control={
-            <button
-              className="mc-btn ghost"
-              onClick={(e) => { e.stopPropagation(); openExternal('https://github.com/ZeroAIx/ZeroInfer/issues'); }}
-            >
-              <Icon name="arrow_right" size={11}/> Open in browser
-            </button>
-          }
-        />
-      </div>
-
-      <h3 className="s-h">Storage</h3>
-      <div className="s-card">
-        <Row
-          title="Models cache"
-          sub={(() => {
-            const paths = cacheStat.paths || [];
-            const pathStr = paths.length === 0
-              ? (pyStatus?.hfCachePath || '-')
-              : (paths.length === 1 ? paths[0] : paths.join('  +  '));
-            if (sizeLoading.hf) return `${pathStr} · Calculating…`;
-            const sizeStr = `${fmtBytes(cacheStat.bytes)}${cacheStat.files != null ? ` · ${cacheStat.files} file${cacheStat.files === 1 ? '' : 's'}` : ''}`;
-            return `${pathStr} · ${sizeStr}`;
-          })()}
-          control={
-            <button
-              className="mc-btn ghost danger"
-              onClick={(e) => { e.stopPropagation(); setConfirmKey('hf'); }}
-              title="Delete every downloaded model in every detected cache. Re-running an installed model will re-download it."
-              disabled={busy === 'hf' || sizeLoading.hf || cacheStat.bytes === 0}
-            >
-              <Icon name="trash" size={11}/> {busy === 'hf' ? 'Clearing…' : sizeLoading.hf ? 'Calculating…' : 'Clean'}
-            </button>
-          }
-        />
-        <Row
-          title="Python runtime"
-          sub={(() => {
-            if (busy === 'py') return clearStep || 'Removing the runtime…';
-            // Two directories now: the venv, and the wheel cache that feeds it.
-            // The cache is the larger of the two by an order of magnitude, so it
-            // gets named rather than quietly folded into the total.
-            const paths = runtimeStat.paths || [];
-            const pathStr = paths.length ? paths.join('  +  ') : (pyStatus?.runtimePath || '-');
-            if (sizeLoading.py) return `${pathStr} · Calculating…`;
-            const sizeStr = `${fmtBytes(runtimeStat.bytes)}${runtimeStat.files != null ? ` · ${runtimeStat.files} file${runtimeStat.files === 1 ? '' : 's'}` : ''}`;
-            return `${pathStr} · ${sizeStr}`;
-          })()}
-          control={
-            <button
-              className="mc-btn ghost danger"
-              onClick={(e) => { e.stopPropagation(); setConfirmKey('py'); }}
-              title="Delete the Python runtime (torch, transformers, all deps). Reinstall it from the setup prompt afterwards."
-              disabled={busy === 'py' || sizeLoading.py || runtimeStat.bytes === 0}
-            >
-              <Icon name="trash" size={11}/> {busy === 'py' ? 'Removing…' : sizeLoading.py ? 'Calculating…' : 'Clean'}
-            </button>
-          }
-        />
-        <Row
-          title="Logs"
-          sub={logsPath || '-'}
-          control={
-            <button
-              className="mc-btn ghost"
-              onClick={(e) => { e.stopPropagation(); viewLogs(); }}
-              title="Open log file in text editor"
-              disabled={!logsPath}
-            >
-              <Icon name="file" size={11}/> View
-            </button>
-          }
-        />
-        {error && <div className="s-row-error mono">{error}</div>}
-      </div>
-
-      <ConfirmDialog
-        open={confirmKey === 'hf'}
-        title="Clear models cache?"
-        message="Deletes every weight file in hf-cache. Models you've installed will need to be re-downloaded the next time you run them. This does not affect your sessions or settings."
-        confirmLabel="Clear cache"
-        cancelLabel="Cancel"
-        danger
-        onConfirm={() => doClear('hf')}
-        onCancel={() => setConfirmKey(null)}
-      />
-      <ConfirmDialog
-        open={confirmKey === 'py'}
-        title="Delete Python runtime?"
-        message="Deletes the Python environment (torch, transformers, diffusers and every other dependency) and the cache of downloaded wheels. You'll need to reinstall the runtime before running a model again."
-        confirmLabel="Delete runtime"
-        cancelLabel="Cancel"
-        danger
-        onConfirm={() => doClear('py')}
-        onCancel={() => setConfirmKey(null)}
-      />
-    </div>
-  );
+  return <>
+    <SettingGroup title="Appearance">
+      <SettingRow title="Theme" sub="Use your system appearance or choose a theme."><select aria-label="Theme" className="setting-select" value={draft.theme} onChange={e => change({ theme: e.target.value })}>
+        {[['system', 'System'], ['dark', 'Dark'], ['light', 'Light'], ['nord', 'Nord'], ['dracula', 'Dracula'], ['tokyo', 'Tokyo Night'], ['catppuccin', 'Catppuccin'], ['gruvbox', 'Gruvbox'], ['onedark', 'One Dark']].map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+      </select></SettingRow>
+      <div className="appearance-previews" aria-hidden="true">{['light', 'dark', 'system'].map(t => <div key={t} className={`appearance-preview ${t} ${draft.theme === t ? 'selected' : ''}`}><div className="preview-window"><aside/><main><i/><i/><i/><b/></main></div><span>{t === 'system' ? 'Match system' : t === 'dark' ? 'Dark' : 'Light'}</span></div>)}</div>
+      <SettingRow title="Conversation text size"><select aria-label="Conversation text size" className="setting-select" value={draft.textSize} onChange={e => change({ textSize: e.target.value })}>{['small', 'default', 'large'].map(v => <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}</select></SettingRow>
+      <SettingRow title="Reduce motion" sub="Minimize animations throughout the app."><Toggle label="Reduce motion" checked={draft.reduceMotion} onChange={v => change({ reduceMotion: v })}/></SettingRow>
+    </SettingGroup>
+    <SettingGroup title="Desktop">
+      <SettingRow title="Launch at login" sub={startup?.supported === false ? 'Available in installed Windows and macOS apps.' : 'Start quietly in the system tray when you sign in.'}><Toggle label="Launch at login" checked={startup?.enabled} disabled={!startup?.supported || busy} onChange={login}/></SettingRow>
+      <SettingRow title="Hardware monitor" sub="Show CPU, memory, and GPU usage in the sidebar."><Toggle label="Hardware monitor" checked={draft.showHardware} onChange={v => change({ showHardware: v })}/></SettingRow>
+      <SettingRow title="Send with Enter" sub="When off, use Ctrl+Enter or ⌘+Enter. Shift+Enter always adds a line."><Toggle label="Send with Enter" checked={draft.sendOnEnter} onChange={v => change({ sendOnEnter: v })}/></SettingRow>
+      <p className="setting-description">Closing the window keeps models available in the tray. Use Quit ZeroInfer in the tray menu to shut down the engine.</p>
+    </SettingGroup>
+    <SettingGroup title="About"><SettingRow title={`ZeroInfer ${version || ''}`} sub="Local models. One workspace."><UpdateCheckButton currentVersion={version}/></SettingRow>
+      <SettingRow title="Help & feedback"><button className="settings-link" onClick={() => window.zeroinfer.app.openExternal('https://github.com/ZeroAIx/ZeroInfer/issues')}>Report an issue <Icon name="arrow_right" size={13}/></button></SettingRow>
+    </SettingGroup><Notice error>{error}</Notice>
+  </>;
 }
 
-function AppearanceSection({ theme, setTheme }) {
-  const themes = [
-    { id: 'dark',       label: 'Dark' },
-    { id: 'light',      label: 'Light' },
-    { id: 'nord',       label: 'Nord' },
-    { id: 'dracula',    label: 'Dracula' },
-    { id: 'tokyo',      label: 'Tokyo Night' },
-    { id: 'catppuccin', label: 'Catppuccin' },
-    { id: 'gruvbox',    label: 'Gruvbox' },
-    { id: 'onedark',    label: 'One Dark' },
-  ];
-  return (
-    <div className="s-section">
-      <h3 className="s-h">Theme</h3>
-      <div className="s-card s-card-pad">
-        <div className="s-theme-grid">
-          {themes.map(t => (
-            <button
-              key={t.id}
-              className={`s-theme-card ${theme === t.id ? 'active' : ''}`}
-              onClick={() => setTheme(t.id)}
-            >
-              <div className={`s-theme-preview ${t.id}`}>
-                <div className="stp-bar"/>
-                <div className="stp-row stp-r1"/>
-                <div className="stp-row stp-r2"/>
-                <div className="stp-row stp-r3"/>
-              </div>
-              <div className="s-theme-name">{t.label}</div>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function HardwareSection({ hw, pyStatus, pySetup, runSetup, refreshPyStatus }) {
-  const isMac = pyStatus?.platform === 'darwin';
-  const running = !!pySetup?.running;
-  const ready = !!pyStatus?.ready;
-  const fmtGb = (b) => b ? (b / (1024 ** 3)).toFixed(1) + ' GB' : '-';
-
-  return (
-    <div className="s-section">
-      <h3 className="s-h">System</h3>
-      <div className="s-card">
-        <Row title="CPU" sub={`${hw?.cpu?.brand || '-'}${hw?.cpu?.cores ? ` · ${hw.cpu.cores}c / ${hw.cpu.threads}t` : ''}`}/>
-        <Row title="GPU" sub={`${hw?.gpu?.model || '-'}${hw?.gpu?.memTotal ? ` · ${fmtGb(hw.gpu.memTotal)} VRAM${hw?.gpu?.unified ? ' (unified)' : ''}` : ''}`}/>
-        <Row title="RAM" sub={`${fmtGb(hw?.mem?.total)}${hw?.mem?.free ? ` · ${fmtGb(hw.mem.free)} free` : ''}`}/>
-        <Row title="Disk" sub={`${fmtGb(hw?.disk?.free)} free${hw?.disk?.mount ? ` · ${hw.disk.mount}` : ''}`}/>
-      </div>
-
-      <h3 className="s-h">Python Runtime</h3>
-      <div className="s-card">
-        <Row
-          title="Status"
-          sub={running ? (pySetup?.step || 'Installing…') : ready ? 'Ready to run inference' : 'Not installed. Pick CPU or GPU to begin.'}
-          control={
-            running
-              ? <span className="s-pill warn"><span className="dot"/> installing…</span>
-              : ready
-                ? <span className="s-pill ok"><span className="dot"/> ready</span>
-                : (() => {
-
-
-
-                    const suggested = pyStatus?.suggestedAccelerator || 'cpu';
-                    const hasNvidia = !!pyStatus?.hasNvidia && !isMac;
-                    return (
-                      <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-                        {hasNvidia && (
-                          <button
-                            className="mc-btn primary"
-                            onClick={() => runSetup && runSetup({ accelerator: 'gpu' })}
-                            title="Install the CUDA-enabled PyTorch wheel (~1 GB). Recommended on machines with an NVIDIA GPU."
-                          >
-                            <Icon name="arrow_right" size={12}/> Install GPU runtime
-                          </button>
-                        )}
-                        <button
-                          className={hasNvidia ? 'mc-btn ghost' : 'mc-btn primary'}
-                          onClick={() => runSetup && runSetup({ accelerator: 'cpu' })}
-                          title={hasNvidia
-                            ? 'Install the CPU-only PyTorch wheel. Lighter (~600 MB), runs on any hardware.'
-                            : `Install the ${isMac ? 'Apple Silicon (MPS)' : 'CPU'} PyTorch wheel.`}
-                        >
-                          <Icon name="arrow_right" size={12}/> Install {isMac ? 'runtime' : 'CPU runtime'}
-                        </button>
-                      </div>
-                    );
-                  })()
-          }
-        />
-        {pySetup?.error && !running && (
-          <div className="s-row-error mono" style={{marginTop:6}}>{pySetup.error}</div>
-        )}
-        {pyStatus?.installedAccelerator && (() => {
-          const active = pyStatus.installedAccelerator;
-          const next = active === 'gpu' ? 'cpu' : 'gpu';
-          const otherInstalled = !!pyStatus?.accelerators?.[next]?.installed;
-          const switchLabel = otherInstalled
-            ? `Switch to ${next.toUpperCase()}`
-            : `Install ${next.toUpperCase()} runtime`;
-          return (
-            <Row
-              title="Accelerator"
-              sub={active === 'gpu'
-                ? (isMac ? 'Apple Metal (MPS)' : 'GPU (CUDA 12.4)')
-                : 'CPU only'}
-              control={!isMac && ready && !running
-                ? <button
-                    className="mc-btn primary"
-                    onClick={() => runSetup && runSetup({ accelerator: next })}
-                    title={otherInstalled
-                      ? `${next.toUpperCase()} runtime is already installed in py-runtime/${next}/. Switching just flips the active pointer.`
-                      : `${next.toUpperCase()} runtime not installed yet. Will download torch + deps for the new accelerator (~1 GB).`}
-                  >
-                    <Icon name="arrow_right" size={12}/> {switchLabel}
-                  </button>
-                : null}
-            />
-          );
-        })()}
-        {running && (
-          <div className="s-row" style={{paddingTop: 6}}>
-            <div className="s-row-l" style={{flex:1}}>
-              <div className="py-progress"><div className="py-progress-bar"/></div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ApiSection() {
-  const [st, setSt] = useStateS(null);
-  const [busy, setBusy] = useStateS(false);
-  const [mcp, setMcp] = useStateS([]);   // [{ id, label, command }] - one per client
-  const [copied, setCopied] = useStateS(null);
-
-  const refresh = async () => {
-    try { setSt(await window.zeroinfer?.api?.status()); } catch { setSt(null); }
-  };
-
-  useEffectS(() => {
-    refresh();
-    window.zeroinfer?.api?.mcpCommand?.().then((r) => setMcp(r?.clients || [])).catch(() => {});
-  }, []);
-
-  const toggle = async () => {
-    setBusy(true);
-    try {
-      const next = st?.running
-        ? await window.zeroinfer.api.stop()
-        : await window.zeroinfer.api.start();
-      setSt(next);
-    } catch { /* the status row shows whatever state we end up in */ }
-    setBusy(false);
-    refresh();
-  };
-
-  const copy = (text, key) => {
-    navigator.clipboard?.writeText(text);
-    setCopied(key);
-    setTimeout(() => setCopied(null), 1400);
-  };
-
-  const running = !!st?.running;
-  const base = st?.url ? `${st.url}/v1` : 'http://localhost:11500/v1';
-
-  return (
-    <div className="s-section">
-      <h3 className="s-h">Local API</h3>
-      <div className="s-card">
-        <Row
-          title="OpenAI-compatible API"
-          sub={running
-            ? 'Running. Other programs on this machine can drive your loaded models.'
-            : 'Off. Nothing is listening.'}
-          control={
-            <button className={`mc-btn ${running ? 'ghost danger' : 'primary'}`} onClick={toggle} disabled={busy}>
-              {busy ? '…' : running ? 'Turn off' : 'Turn on'}
-            </button>
-          }
-        />
-        {running && (
-          <Row
-            title="Base URL"
-            sub="Point LangChain or the OpenAI SDK here. Any api key works."
-            value={base}
-            control={
-              <button className="mc-btn ghost" onClick={() => copy(base, 'url')}>
-                {copied === 'url' ? 'Copied' : 'Copy'}
-              </button>
-            }
-          />
-        )}
-        {st?.error && (
-          <Row
-            title="Could not start"
-            sub={st.error.includes('address') || st.error.includes('10048')
-              ? 'Port 11500 is already in use - another ZeroInfer, or another app.'
-              : st.error}
-          />
-        )}
-      </div>
-
-      <h3 className="s-h">MCP server</h3>
-      {mcp.map((c) => (
-        // One card per client: the name, what to do with the thing, and the
-        // thing itself. The previous shape - a row per client, then a stack of
-        // captioned code blocks underneath - made you match up two lists by eye.
-        <div className="s-card mcp" key={c.id}>
-          <div className="mcp-head">
-            <div className="mcp-l">
-              <div className="s-row-t">{c.label}</div>
-              <div className="s-row-s">
-                {running ? c.hint : 'Turn the API on first - the MCP server connects to it.'}
-              </div>
-            </div>
-            <button className="mc-btn ghost" onClick={() => copy(c.command, c.id)}>
-              {copied === c.id ? 'Copied' : (c.copyLabel || 'Copy')}
-            </button>
-          </div>
-          {c.value && <div className="mcp-path mono">{c.value}</div>}
-          <pre className="s-code mono">{c.command}</pre>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function HFSection() {
-  return (
-    <div className="s-section">
-      <h3 className="s-h">Access Token</h3>
-      <div className="s-card s-card-pad">
-        <HFTokenCard/>
-      </div>
-    </div>
-  );
-}
-
-function UpdateCheckButton({ currentVersion }) {
-  const [state, setState] = useStateS('idle');
-  const [result, setResult] = useStateS(null);
-  const [progress, setProgress] = useStateS(0);   
-  const [confirmOpen, setConfirmOpen] = useStateS(false);
-  const openExternal = (url) => window.zeroinfer?.app?.openExternal?.(url);
-
-
-
-
-
-  useEffectS(() => {
-    let mounted = true;
-    const u = window.zeroinfer?.updates;
-    if (!u) return;
-    const offProgress = u.onProgress?.((evt) => {
-      if (!mounted) return;
-      setProgress(Math.round(evt?.percent || 0));
-      setState((s) => (s === 'downloading' || s === 'available' ? 'downloading' : s));
-    });
-    const offDownloaded = u.onDownloaded?.((evt) => {
-      if (!mounted) return;
-      setProgress(100);
-      setResult((r) => ({ ...(r || {}), latestVersion: evt?.version || r?.latestVersion }));
-      setState('downloaded');
-    });
-    const offError = u.onError?.((evt) => {
-      if (!mounted) return;
-
-
-
-
-      const errStr = evt?.error || 'Unknown error';
-      setResult((r) => {
-        const hadUpdate = !!(r && r.hasUpdate);
-        return {
-          ...(r || {}),
-          error: errStr,
-          ...(hadUpdate ? { canAutoUpdate: false } : {}),
-        };
-      });
-      setState((s) => {
-        if (s === 'downloading' || s === 'downloaded') return 'available';
-        return 'idle';
-      });
-    });
-
-    (async () => {
-      if (!mounted) return;
-      setState('checking');
-      try {
-        const r = await u.check?.();
-        if (!mounted) return;
-        if (!r || !r.ok) { setState('idle'); return; }
-        setResult(r);
-        setState(r.hasUpdate ? 'available' : 'uptodate');
-      } catch { if (mounted) setState('idle'); }
-    })();
-
-    return () => {
-      mounted = false;
-      offProgress && offProgress();
-      offDownloaded && offDownloaded();
-      offError && offError();
-    };
-  }, []);
-
-  const check = async () => {
-    setState('checking');
-    setProgress(0);
-    try {
-
-      const r = await window.zeroinfer?.updates?.check?.({ force: true });
-      if (!r || !r.ok) {
-
-        setResult(r || { error: 'unknown' });
-        setState('idle');
-        return;
-      }
-      setResult(r);
-      setState(r.hasUpdate ? 'available' : 'uptodate');
-    } catch (e) {
-      setResult({ error: String(e?.message || e) });
-      setState('idle');
-    }
-  };
-
-
-
-  const requestDownload = () => setConfirmOpen(true);
-
-  const confirmAndDownload = async () => {
-    setConfirmOpen(false);
-    setProgress(0);
-    setState('downloading');
-    try {
-      const r = await window.zeroinfer?.updates?.download?.();
-      if (!r) { setState('error'); setResult({ error: 'No response' }); return; }
-      if (r.alreadyDownloaded) { setProgress(100); setState('downloaded'); return; }
-      if (!r.ok) { setResult({ error: r.error || 'Download failed' }); setState('error'); return; }
-
-    } catch (e) {
-      setResult({ error: String(e?.message || e) });
-      setState('error');
-    }
-  };
-
-  const installAndRestart = async () => {
-    setState('installing');
-
-
-
-    window.dispatchEvent(new CustomEvent('zeroinfer:update-installing', {
-      detail: { version: result?.latestVersion || '' },
-    }));
-
-
-
-    const timeoutId = setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('zeroinfer:update-install-failed'));
-      setResult((r) => ({ ...(r || {}), error: 'Install timed out. Try downloading the installer manually from the website.' }));
-      setState('idle');
-    }, 30000);
-
-    try { await window.zeroinfer?.updates?.install?.(); }
-    catch (e) {
-      clearTimeout(timeoutId);
-      setResult({ error: String(e?.message || e) });
-      setState('error');
-      window.dispatchEvent(new CustomEvent('zeroinfer:update-install-failed'));
-    }
-
-  };
-
-  if (state === 'checking') {
-    return (
-      <button className="mc-btn ghost" disabled>
-        <span className="upd-spin"/> Checking…
-      </button>
-    );
-  }
-  if (state === 'available' && result?.hasUpdate) {
-    const canAuto = !!result.canAutoUpdate;
-    return (
-      <>
-        <div className="upd-result">
-          <span className="upd-tag mono">{result.latestVersion}</span>
-          {canAuto ? (
-            <button className="mc-btn primary" onClick={requestDownload}>
-              <Icon name="arrow_right" size={11}/> Download
-            </button>
-          ) : (
-            <button
-              className="mc-btn primary"
-              onClick={() => openExternal(result.downloadPageUrl || result.releaseUrl)}
-            >
-              <Icon name="arrow_right" size={11}/> Open download page
-            </button>
-          )}
-        </div>
-        <ConfirmDialog
-          open={confirmOpen}
-          title={`Download ZeroInfer ${result.latestVersion}?`}
-          message="The update will download in the background. You'll be prompted to install and restart when it's ready."
-          confirmLabel="Download"
-          cancelLabel="Cancel"
-          onConfirm={confirmAndDownload}
-          onCancel={() => setConfirmOpen(false)}
-        />
-      </>
-    );
-  }
-  if (state === 'downloading') {
-    return (
-      <div className="upd-result upd-result-col">
-        <div className="upd-progress">
-          <div className="upd-progress-bar" style={{ width: `${progress}%` }}/>
-        </div>
-        <span className="upd-tag mono">{progress}%</span>
-      </div>
-    );
-  }
-  if (state === 'downloaded') {
-    return (
-      <div className="upd-result">
-        <span className="upd-tag mono">{result?.latestVersion || 'ready'}</span>
-        <button className="mc-btn primary" onClick={installAndRestart}>
-          <Icon name="arrow_right" size={11}/> Install &amp; restart
-        </button>
-      </div>
-    );
-  }
-  if (state === 'installing') {
-    return (
-      <button className="mc-btn ghost" disabled>
-        <span className="upd-spin"/> Restarting…
-      </button>
-    );
-  }
-  if (state === 'uptodate') {
-    return (
-      <button className="mc-btn ghost" onClick={check}>
-        <Icon name="check_c" size={11}/> Up to date
-      </button>
-    );
-  }
-  return (
-    <button className="mc-btn ghost" onClick={check} title={result?.error || ''}>
-      <Icon name="arrow_right" size={11}/> Check for updates
-    </button>
-  );
+function PersonalizationSettings({ draft, change }) {
+  return <>
+    <SettingRow title="Enable personalization" sub="Apply your preferences to conversations in ZeroInfer."><Toggle label="Enable personalization" checked={draft.personalizationEnabled} onChange={v => change({ personalizationEnabled: v })}/></SettingRow>
+    <fieldset className="personalization-fields" disabled={!draft.personalizationEnabled}>
+      <SettingRow title="Response style" sub="Set the tone for your local chat models."><select className="setting-select" aria-label="Response style" value={draft.responseStyle} onChange={e => change({ responseStyle: e.target.value })}>
+        <option value="default">Default</option><option value="concise">Concise</option><option value="friendly">Friendly</option><option value="technical">Technical</option>
+      </select></SettingRow>
+      <SettingGroup title="Custom instructions" description="What should your models know about how you would like them to respond?">
+        <textarea className="setting-textarea" aria-label="Custom instructions" placeholder="For example: explain concepts clearly, include practical examples, and ask when something is unclear."
+          rows={5} maxLength={4000} value={draft.customInstructions} onChange={e => change({ customInstructions: e.target.value })}/>
+        <div className="setting-field-hint">Used with each chat message. Model support and adherence may vary.<span>{draft.customInstructions.length.toLocaleString()} / 4,000</span></div>
+      </SettingGroup>
+      <SettingGroup title="About you"><label className="setting-label" htmlFor="settings-nickname">Nickname</label><input id="settings-nickname" className="setting-input" maxLength={80} placeholder="What should models call you?" value={draft.nickname} onChange={e => change({ nickname: e.target.value })}/></SettingGroup>
+    </fieldset>
+    <SettingGroup title="Chat generation" description="Defaults for text responses in the chat workspace.">
+      <SettingRow title="Maximum response tokens" sub="Longer responses take more time and memory."><input className="setting-input short" type="number" aria-label="Maximum response tokens" min={16} max={8192} step={16} value={draft.maxNewTokens} onChange={e => change({ maxNewTokens: e.target.value })}/></SettingRow>
+      <SettingRow title="Temperature" sub="Lower values are more predictable. Zero uses greedy decoding."><input className="setting-input short" type="number" aria-label="Temperature" min={0} max={2} step={0.1} value={draft.temperature} onChange={e => change({ temperature: e.target.value })}/></SettingRow>
+    </SettingGroup>
+  </>;
 }

@@ -15,10 +15,10 @@
  *
  * Every client runs that same stdio server and only disagrees about where the
  * registration is recorded (~/.claude.json, ~/.codex/config.toml, or Claude
- * Desktop's claude_desktop_config.json). Settings -> API & MCP prints the exact
+ * Desktop's claude_desktop_config.json). Settings -> Apps & integrations prints the exact
  * command for each one.
  *
- * `mcp` and `httpx` are in the base venv (see python-env.SERVER_DEPS), so the
+ * `mcp<2` and `httpx` are in the base venv (see python-env.SERVER_DEPS), so the
  * launcher has everything it needs.
  *
  * The MCP server is an HTTP *client* of ZeroInfer's local API - that is what lets
@@ -47,8 +47,19 @@ installed app. Rewritten on every launch, so it survives app updates.
     codex  mcp add zeroinfer -- "${launcherPath(userData).replace(/\\/g, '\\\\')}"
 """
 import sys
+import os
+import json
+from pathlib import Path
 
-sys.path.insert(0, r"${pythonDir}")
+sys.path.insert(0, ${JSON.stringify(pythonDir)})
+# Read the saved port each time the MCP client starts this launcher.
+try:
+    settings = json.loads((Path(__file__).parent / "settings.json").read_text(encoding="utf-8"))
+    port = int(settings.get("apiPort") or 11500)
+    if 1024 <= port <= 65535:
+        os.environ.setdefault("ZEROINFER_URL", f"http://127.0.0.1:{port}")
+except (OSError, ValueError, TypeError):
+    pass
 
 from mcp_server.server import main
 

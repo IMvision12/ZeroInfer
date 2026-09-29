@@ -141,7 +141,7 @@ function createWindow() {
   // Keep external links in the user's browser, not in an app window with no
   // chrome to escape from.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
 
@@ -330,39 +330,7 @@ ipcMain.handle('boot:open-python-download', async () => {
 // the IDE extension all share ~/.codex/config.toml, so `codex mcp add` registers
 // ZeroInfer with all three at once.
 ipcMain.handle('zeroinfer:mcpCommand', async () => {
-  const userData = app.getPath('userData');
-  const py = venvPython(userData);
-  const launcher = launcherPath(userData);
-  const add = (cli) => `${cli} mcp add zeroinfer -- "${py}" "${launcher}"`;
-
-  // appData maps to the right place on every platform: %APPDATA% on Windows,
-  // ~/Library/Application Support on macOS, ~/.config on Linux.
-  const desktopConfig = path.join(app.getPath('appData'), 'Claude', 'claude_desktop_config.json');
-  // JSON.stringify does the backslash escaping the file needs, so the snippet is
-  // paste-ready rather than something the user has to fix up by hand.
-  const desktopSnippet = JSON.stringify(
-    { mcpServers: { zeroinfer: { command: py, args: [launcher] } } }, null, 2);
-
-  return {
-    clients: [
-      {
-        id: 'claude', label: 'Claude Code', copyLabel: 'Copy command',
-        hint: 'Run this once in a terminal. Registers Claude Code only - Claude Desktop is separate.',
-        command: add('claude'),
-      },
-      {
-        id: 'codex', label: 'Codex', copyLabel: 'Copy command',
-        // Unlike Claude, one registration covers every Codex surface: the CLI,
-        // the desktop app and the IDE extension all read ~/.codex/config.toml.
-        hint: 'Run this once in a terminal. Covers the CLI, the desktop app and the IDE extension.',
-        command: add('codex'),
-      },
-      {
-        id: 'claude-desktop', label: 'Claude Desktop', copyLabel: 'Copy config',
-        hint: 'No CLI - merge this into the config file, then restart Claude Desktop.',
-        value: desktopConfig,
-        command: desktopSnippet,
-      },
-    ],
-  };
+  const { mcpClients } = require('./mcp-clients');
+  return mcpClients({ python: venvPython(app.getPath('userData')),
+    launcher: launcherPath(app.getPath('userData')), appData: app.getPath('appData') });
 });

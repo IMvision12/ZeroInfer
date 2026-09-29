@@ -83,7 +83,7 @@ function generateHtml() {
 // aren't transformed (CSS, fonts, anything dropped into src/renderer/).
 function copyStaticAssets() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
-  for (const name of ['styles.css']) {
+  for (const name of ['styles.css', 'product.css', 'preferences.js']) {
     const src = path.join(RENDERER_DIR, name);
     if (fs.existsSync(src)) {
       fs.copyFileSync(src, path.join(OUT_DIR, name));
@@ -174,11 +174,14 @@ async function buildWatch() {
       try { generateHtml(); console.log('[renderer] re-emitted index.html'); } catch (e) { console.warn('[renderer] html rebuild failed:', e.message); }
     });
   } catch {}
-  try {
-    fs.watch(path.join(RENDERER_DIR, 'styles.css'), () => {
-      try { copyStaticAssets(); console.log('[renderer] copied styles.css'); } catch {}
-    });
-  } catch {}
+  for (const name of ['styles.css', 'product.css', 'preferences.js']) {
+    try {
+      fs.watch(path.join(RENDERER_DIR, name), () => {
+        try { copyStaticAssets(); console.log(`[renderer] copied ${name}`); }
+        catch (e) { console.warn('[renderer] asset rebuild failed:', e.message); }
+      });
+    } catch {}
+  }
 
   console.log(`[renderer] watching ${entries.length} component(s) for changes…`);
 
