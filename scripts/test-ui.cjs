@@ -43,10 +43,7 @@ app.whenReady().then(async () => {
   await input('[aria-label="Response style"]', 'concise');
   await shot('settings-personalization');
   await checkLayout();
-  await input('[aria-label="Maximum response tokens"]', '0');
-  await click('Save changes');
-  assert.match(await js(`document.querySelector('.settings-save-status').textContent`), /whole number/);
-  await input('[aria-label="Maximum response tokens"]', '512');
+  assert.equal(await js(`document.querySelector('.settings-body').textContent.includes('Chat generation')`), false);
   await js(`document.querySelector('[aria-label="Close settings"]').click()`);
   await waitFor(`!!document.querySelector('[role="alertdialog"]')`);
   // A bubbled Enter must not invoke a global destructive confirmation handler.
@@ -114,6 +111,10 @@ app.whenReady().then(async () => {
   assert.match(await js(`document.querySelector('.model-card').textContent`), /Qwen/);
   await js(`document.querySelector('.chat-item').click()`); await pause();
   await waitFor(`!!document.querySelector('.cc-input')`);
+  await js(`document.querySelector('.chat-composer .tw-params').open = true`);
+  await input('#p-max_new_tokens', '768');
+  await input('#p-temperature', '0.35');
+  await js(`document.querySelector('#p-do_sample').click()`); await pause();
   await input('.cc-input', 'What color did I mention?');
   await js(`window.__test.fail('chatSave', 'Disk is full'); document.querySelector('.cc-send').click()`); await pause();
   assert.match(await js(`document.querySelector('.chat-err').textContent`), /Could not save/);
@@ -125,6 +126,10 @@ app.whenReady().then(async () => {
   assert.equal(payload.input.messages[0].role, 'system');
   assert.match(payload.input.messages[0].content, /Alex/);
   assert.equal(payload.input.messages.length, 4);
+  assert.equal(payload.params.max_new_tokens, 768);
+  assert.equal(payload.params.temperature, 0.35);
+  assert.equal((await js('window.__test.snapshot()')).chat.params.max_new_tokens, 768);
+  await js(`document.querySelector('.chat-composer .tw-params').open = false`);
   await shot('chat');
   assert.deepEqual(errors, [], 'Renderer console must have no errors');
   console.log('PASS: settings persistence, error states, API port, ChatGPT MCP setup, clipboard feedback, unload, export, keyboard cancellation, token errors, responsive layout, download retry, offline library, chat save recovery and history.');

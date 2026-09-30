@@ -1,19 +1,10 @@
 """automatic-speech-recognition - one variant that decides chunking from
-actual audio duration and renders inline timestamps when requested."""
+actual audio duration and preserves structured timestamps when requested."""
 from __future__ import annotations
 
 from .base import TaskHandler, TaskVariant
 from io_utils import decode_audio
 import output_kinds as ok
-
-def _format_timestamp(t):
-    """Convert a Whisper timestamp (float seconds) to mm:ss.d. Some chunks
-    report (start, None) for the last chunk - render `?` in that case."""
-    if t is None:
-        return "?"
-    mins = int(t) // 60
-    secs = t - mins * 60
-    return f"{mins:02d}:{secs:05.2f}"
 
 class ASRVariant(TaskVariant):
     """Single variant: decode audio, compute duration, pass through the user's
@@ -45,18 +36,12 @@ class ASRVariant(TaskVariant):
         result = state.pipe({"array": audio, "sampling_rate": sr}, **kwargs)
         text = (result.get("text") or "").strip()
         chunks = result.get("chunks")
-        if want_timestamps and chunks:
-            lines = []
-            for c in chunks:
-                ts = c.get("timestamp") or (None, None)
-                start = ts[0] if len(ts) > 0 else None
-                end = ts[1] if len(ts) > 1 else None
-                seg = (c.get("text") or "").strip()
-                if not seg:
-                    continue
-                lines.append(f"[{_format_timestamp(start)} → {_format_timestamp(end)}] {seg}")
-            if lines:
-                return ok.text("\n".join(lines))
+        if want_timestamps:
+            segments = []
+            for c in chunks or []:
+                start, end = c.get("timestamp") or (None, None)
+                segments.append({"start": start, "end": end, "text": (c.get("text") or "").strip()})
+            return {**ok.text(text), "segments": segments, "duration_seconds": duration_s}
         return ok.text(text)
 
 class ASRTask(TaskHandler):

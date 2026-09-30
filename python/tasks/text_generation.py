@@ -56,6 +56,8 @@ class ReasoningVariant(TaskVariant):
         prompt = _chat_prompt(state, inputs)
         kwargs = {k: params[k] for k in ("max_new_tokens", "temperature", "top_p", "top_k", "do_sample") if k in params}
         kwargs.setdefault("max_new_tokens", 512)
+        from generation_control import stopping_criteria
+        kwargs["stopping_criteria"] = stopping_criteria()
         raw = state.pipe(prompt, **kwargs)
         out = (raw[0] if isinstance(raw, list) else raw).get("generated_text") or ""
         if out.startswith(prompt):
@@ -74,6 +76,8 @@ class ChatTemplateVariant(TaskVariant):
         prompt = _chat_prompt(state, inputs)
         kwargs = {k: params[k] for k in ("max_new_tokens", "temperature", "top_p", "top_k", "do_sample") if k in params}
         kwargs.setdefault("max_new_tokens", 256)
+        from generation_control import stopping_criteria
+        kwargs["stopping_criteria"] = stopping_criteria()
         raw = state.pipe(prompt, **kwargs)
         r0 = raw[0] if isinstance(raw, list) else raw
         out = r0.get("generated_text") or ""
@@ -94,6 +98,8 @@ class PlainGenVariant(TaskVariant):
         for k in ("src_lang", "tgt_lang"):
             if params.get(k):
                 kwargs[k] = params[k]
+        from generation_control import stopping_criteria
+        kwargs["stopping_criteria"] = stopping_criteria()
         raw = state.pipe(text, **kwargs)
         r0 = raw[0] if isinstance(raw, list) else raw
         out = r0.get("generated_text") or r0.get("translation_text") or r0.get("summary_text") or ""
@@ -139,6 +145,8 @@ class Seq2SeqVariant(TaskVariant):
                 pass
         device = next(model.parameters()).device
         ids = tokenizer(text, return_tensors="pt", truncation=True).input_ids.to(device)
+        from generation_control import stopping_criteria
+        kwargs["stopping_criteria"] = stopping_criteria()
         with torch.no_grad():
             out_ids = model.generate(ids, **kwargs)
         out = tokenizer.decode(out_ids[0], skip_special_tokens=True)

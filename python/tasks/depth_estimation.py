@@ -60,7 +60,9 @@ class DepthEstimationVariant(TaskVariant):
         result = state.pipe(img)
         depth = None
         if isinstance(result, dict):
-            depth = result.get("depth") or result.get("predicted_depth")
+            depth = result.get("depth")
+            if depth is None:
+                depth = result.get("predicted_depth")
         if depth is None:
             raise ValueError("Depth pipeline returned no depth field")
 

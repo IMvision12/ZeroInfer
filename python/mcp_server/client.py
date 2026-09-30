@@ -73,9 +73,15 @@ class ZeroInferClient:
                 r = await c.get(path)
         except httpx.RequestError as e:
             raise self._unreachable(e) from e
-        return self._raise_for_body(r.json())
+        try:
+            body = self._raise_for_body(r.json())
+        except ValueError as exc:
+            raise ZeroInferError(f"HTTP {r.status_code}: invalid JSON response") from exc
+        if r.is_error:
+            raise ZeroInferError(f"HTTP {r.status_code}: {str(body)[:500]}")
+        return body
 
-    async def post(self, path: str, body: dict, *, timeout: float | None = None) -> Any:
+    async def post(self, path: str, body: dict, *, timeout: float | None = None, with_headers: bool = False) -> Any:
         try:
             async with self._client(timeout) as c:
                 r = await c.post(path, json=body)
@@ -86,8 +92,14 @@ class ZeroInferClient:
         if not ctype.startswith("application/json"):
             if r.status_code >= 400:
                 raise ZeroInferError(r.text[:500])
-            return r.content
-        return self._raise_for_body(r.json())
+            return (r.content, dict(r.headers)) if with_headers else r.content
+        try:
+            body = self._raise_for_body(r.json())
+        except ValueError as exc:
+            raise ZeroInferError(f"HTTP {r.status_code}: invalid JSON response") from exc
+        if r.is_error:
+            raise ZeroInferError(f"HTTP {r.status_code}: {str(body)[:500]}")
+        return body
 
     async def post_file(self, path: str, *, filename: str, content: bytes,
                         mime: str, data: dict) -> Any:
@@ -101,7 +113,13 @@ class ZeroInferClient:
             if r.status_code >= 400:
                 raise ZeroInferError(r.text[:500])
             return r.text
-        return self._raise_for_body(r.json())
+        try:
+            body = self._raise_for_body(r.json())
+        except ValueError as exc:
+            raise ZeroInferError(f"HTTP {r.status_code}: invalid JSON response") from exc
+        if r.is_error:
+            raise ZeroInferError(f"HTTP {r.status_code}: {str(body)[:500]}")
+        return body
 
     async def post_sse(self, path: str, body: dict) -> AsyncIterator[dict]:
         """Yield the decoded `data:` payload of each SSE frame."""
@@ -122,7 +140,7 @@ class ZeroInferClient:
     async def health(self) -> dict:
         return await self.get("/api/health", timeout=PROBE_TIMEOUT)
 
-    async def download(self, model_id: str) -> dict:
+    async def download(self, model_id: str, on_progress=None) -> dict:
         """Run the server's snapshot download to completion. Idempotent: an
         already-cached model returns almost immediately.
 
@@ -133,6 +151,8 @@ class ZeroInferClient:
         """
         result: dict = {}
         async for evt in self.post_sse("/api/download", {"modelId": model_id}):
+            if evt.get("type") == "progress" and on_progress:
+                await on_progress(evt)
             if evt.get("type") == "result":
                 result = evt
         if not result:

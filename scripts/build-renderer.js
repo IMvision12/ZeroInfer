@@ -82,8 +82,10 @@ function generateHtml() {
 // Files that the rendered index.html references via relative path and that
 // aren't transformed (CSS, fonts, anything dropped into src/renderer/).
 function copyStaticAssets() {
+  const parameters = JSON.parse(fs.readFileSync(path.join(ROOT, 'python', 'task_parameters.json'), 'utf8'));
+  fs.writeFileSync(path.join(RENDERER_DIR, 'task-parameters.js'), '// Generated from python/task_parameters.json by build-renderer.js\nwindow.ZeroInferParameters = ' + JSON.stringify(parameters) + ';\n');
   fs.mkdirSync(OUT_DIR, { recursive: true });
-  for (const name of ['styles.css', 'product.css', 'preferences.js']) {
+  for (const name of ['styles.css', 'product.css', 'preferences.js', 'task-parameters.js']) {
     const src = path.join(RENDERER_DIR, name);
     if (fs.existsSync(src)) {
       fs.copyFileSync(src, path.join(OUT_DIR, name));
@@ -169,6 +171,9 @@ async function buildWatch() {
   generateHtml();
   copyStaticAssets();
   copyVendorAssets();
+  fs.watch(path.join(ROOT, 'python', 'task_parameters.json'), () => {
+    try { copyStaticAssets(); } catch (e) { console.warn('[renderer] parameter rebuild failed:', e.message); }
+  });
   try {
     fs.watch(SRC_HTML, () => {
       try { generateHtml(); console.log('[renderer] re-emitted index.html'); } catch (e) { console.warn('[renderer] html rebuild failed:', e.message); }

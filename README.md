@@ -145,10 +145,22 @@ claude mcp add zeroinfer -- \
 
 The app rewrites that launcher on every boot, so it survives updates.
 
-Tools: `detect_objects`, `segment_image`, `generate_image`, `transcribe_audio`,
-`text_to_speech`, `generate_text`, `embed_text`, plus `search_models`,
-`download_model`, `list_models` and `zeroinfer_status`. Keep ZeroInfer running while
-you use them.
+MCP supports native text, image, audio and mixed results, with structured metadata
+and downloadable artifacts. Keep ZeroInfer running while using inference tools.
+
+- **Inference:** `detect_objects`, `segment_image`, `generate_image`, `edit_image`,
+  `analyze_image`, `read_document`, `classify_image`, `estimate_depth`,
+  `transcribe_audio`, `text_to_speech`, `generate_text`, `embed_text`.
+- **Discovery:** `zeroinfer_status`, `list_models`, `search_models`,
+  `download_model`, `get_model_capabilities`.
+- **Jobs:** `run_task(background=true)`, `get_job`, `cancel_job`.
+- **Files:** `upload_artifact`, `list_artifacts`, `get_artifact`, `prune_artifacts`,
+  and readable `zeroinfer://artifacts/{id}` resources.
+- **Workflows:** `speech_to_speech`, `analyze_frames`, `index_documents`,
+  `search_documents`.
+
+See [MCP capabilities and deployment](docs/mcp.md) for input formats, limits,
+model-specific parameters, HTTP authentication, and examples.
 
 ## Updating
 
@@ -162,8 +174,8 @@ Settings has a persistent sidebar and a separate scrollable content area:
 
 - **General:** appearance, system theme, text size, reduced motion, keyboard
   behavior, hardware monitor, launch at login, and updates.
-- **Personalization:** response style, custom instructions, nickname, token
-  limit, and temperature. These are applied to local chat requests together with
+- **Personalization:** response style, custom instructions, and nickname.
+  These are applied to local chat requests together with
   conversation history; individual models may follow instructions differently.
 - **Apps & integrations:** local API status and port, plus MCP client setup.
 - **Runtime & hardware:** CPU/CUDA installation or repair, loaded model unloading,
@@ -171,6 +183,9 @@ Settings has a persistent sidebar and a separate scrollable content area:
 - **Data controls:** export sessions, inspect disk use, and remove model caches
   or inference packages with confirmation.
 - **Hugging Face:** manage and verify a token for gated or private models.
+
+Adjust generation hyperparameters in the model workspace's **Parameters** panel
+after opening a model. Chat parameters are saved with the session when you send a message.
 
 Appearance and personalization use **Save changes**. Closing with unsaved edits
 offers a discard confirmation. API, runtime, token, and storage actions apply

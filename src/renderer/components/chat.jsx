@@ -53,6 +53,7 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved, preferences = Z
   const [atts, setAtts] = useStateCH([]);
   const [error, setError] = useStateCH(null);
   const [sending, setSending] = useStateCH(false);
+  const [paramValues, setParamValues] = useStateCH(() => Object.fromEntries(GEN_PARAMS.map(p => [p.key, p.default])));
 
 
   const [stopping, setStopping] = useStateCH(false);
@@ -91,6 +92,7 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved, preferences = Z
         if (!cancelled) setError(`Could not save recovered conversation: ${e.message || e}`);
       });
       setChat(loaded);
+      setParamValues(Object.fromEntries(GEN_PARAMS.map(p => [p.key, c.params?.[p.key] ?? p.default])));
     })();
     return () => { cancelled = true; };
   }, [sessionId]);
@@ -109,6 +111,15 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved, preferences = Z
     const text = input.trim();
     const isGenerate = isJanus && janusMode === 'generate';
     if ((!text && !atts.length) || sending) return;
+    for (const p of GEN_PARAMS) {
+      if (p.type === 'boolean') continue;
+      const value = paramValues[p.key];
+      if (value === '' || !Number.isFinite(value) || value < p.min || value > p.max ||
+          (p.type === 'number' && !Number.isInteger(value))) {
+        setError(`${p.label} must be ${p.type === 'number' ? 'a whole number' : 'a number'} between ${p.min} and ${p.max}.`);
+        return;
+      }
+    }
 
 
     if (isGenerate && !text) {
@@ -150,6 +161,7 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved, preferences = Z
       title: baseTitle,
       modelId,
       task: modelMeta?.task,
+      params: { ...paramValues },
       sub: `${modelId.split('/').pop()} · ${nextMsgs.length} msgs`,
       messages: nextMsgs,
     };
@@ -177,8 +189,9 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved, preferences = Z
     }
     const task = modelMeta?.task || (isVLM ? 'image-text-to-text' : 'text-generation');
     const messages = ZeroPreferences.chatMessages(chat.messages, text, preferences);
-    const params = { max_new_tokens: preferences.maxNewTokens, do_sample: preferences.temperature > 0,
-      ...(preferences.temperature > 0 ? { temperature: preferences.temperature } : {}),
+    const sampling = !!paramValues.do_sample && paramValues.temperature > 0;
+    const params = { max_new_tokens: paramValues.max_new_tokens, do_sample: sampling,
+      ...(sampling ? { temperature: paramValues.temperature, top_p: paramValues.top_p, top_k: paramValues.top_k } : {}),
       ...(isJanus ? { janus_mode: janusMode } : {}) };
     const payload = {
       task,
@@ -284,6 +297,7 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved, preferences = Z
       </div>
 
       <div className="chat-composer">
+        <ParamsPanel schema={GEN_PARAMS} values={paramValues} setValues={setParamValues} modelId={modelId}/>
         {isJanus && <JanusModeBar value={janusMode} onChange={setJanusMode}/>}
         {atts.length > 0 && (
           <div className="cc-atts">

@@ -54,6 +54,9 @@ def items_for(out: dict) -> list[dict]:
     kind = out.get("kind")
     items: list[dict] = []
 
+    if kind == "multimodal":
+        return [item for output in out.get("items", []) for item in items_for(output)]
+
     if kind in ("image", "audio"):
         items.append(_media(out.get("dataUrl")))
     elif kind == "masks":

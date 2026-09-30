@@ -3,8 +3,7 @@
   const defaults = Object.freeze({
     theme: 'dark', textSize: 'default', reduceMotion: false, showHardware: true,
     sendOnEnter: false, personalizationEnabled: true, nickname: '',
-    customInstructions: '', responseStyle: 'default', maxNewTokens: 512,
-    temperature: 0.7,
+    customInstructions: '', responseStyle: 'default',
   });
   const themes = ['system', 'dark', 'light', 'nord', 'dracula', 'tokyo', 'catppuccin', 'gruvbox', 'onedark'];
   const styles = {
@@ -22,8 +21,9 @@
     }
     p.nickname = typeof p.nickname === 'string' ? p.nickname.slice(0, 80) : '';
     p.customInstructions = typeof p.customInstructions === 'string' ? p.customInstructions.slice(0, 4000) : '';
-    p.maxNewTokens = Math.round(Math.max(16, Math.min(8192, Number(p.maxNewTokens) || 512)));
-    p.temperature = Number.isFinite(Number(p.temperature)) ? Math.max(0, Math.min(2, Number(p.temperature))) : 0.7;
+    // Legacy global generation defaults no longer control individual models.
+    delete p.maxNewTokens;
+    delete p.temperature;
     return p;
   }
   function systemPrompt(preferences) {

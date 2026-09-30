@@ -40,6 +40,8 @@ button svg { flex-shrink: 0; }
 .hub-landing-search { --hub-row-h: 52px; margin-top: 5px; }
 .hub-landing-search .hub-search { border-radius: 12px; background: var(--bg-2); padding: 0 18px; }
 .hub-search input { color: var(--fg-0); }
+.hub-search input:focus-visible { outline: none; }
+.hub-search:focus-within { border-color: var(--line-2); }
 .hub-tag { border-radius: 20px; padding: 7px 12px; font-size: 11.5px; }
 .hub-tag.active { background: var(--bg-4); color: var(--fg-0); border-color: var(--line-2); }
 .hub .hub-landing-tags { justify-content: flex-start; }
@@ -65,12 +67,15 @@ button svg { flex-shrink: 0; }
 .chat-sub { font-size: 11px; margin-top: 3px; color: var(--fg-2); }
 .chat-empty { padding: 48px 28px; }
 .chat-empty-t { font-size: 25px; letter-spacing: -.6px; font-weight: 600; }
+.msg.assistant .msg-text,
+.msg.assistant .msg-text :is(strong, b, h1, h2, h3, h4, h5, h6, th) { font-weight: 400; }
 .chat-empty-s { font-size: 13px; max-width: 480px; line-height: 1.7; }
 .chat-body { padding: 28px max(28px, calc((100% - 800px) / 2)) 18px; gap: 24px; }
 .msg-bubble { border-radius: 14px; padding: 14px 18px; max-width: 88%; }
 .msg-text, .tw-text { font-size: var(--conversation-size); line-height: 1.75; }
 .msg-meta { font-family: var(--sans); text-transform: none; letter-spacing: 0; font-size: 11px; }
 .chat-composer { width: min(100%, 840px); margin: 0 auto; padding: 12px 28px 24px; border-top: 0; }
+.chat-composer .tw-params { margin: 0 0 12px; max-height: 220px; overflow-y: auto; }
 .cc-input { min-height: 94px; padding: 16px; border-radius: 14px; font-size: var(--conversation-size); background: var(--bg-2); }
 .cc-send { border-radius: 8px; background: var(--fg-0); color: var(--bg-0); min-height: 34px; box-shadow: none; }
 .tw-run, .tw-params, .tw-guide { border-radius: 12px; }

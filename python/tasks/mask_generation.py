@@ -91,6 +91,7 @@ class AutoMaskGenVariant(TaskVariant):
         total = max(1, W * H)
         overlay_arr = np.zeros((H, W, 4), dtype=np.uint8)
         legend = []
+        exported_masks = []
 
         for (n, score, arr) in items:
             pct = 100.0 * n / total
@@ -98,6 +99,8 @@ class AutoMaskGenVariant(TaskVariant):
                 continue
             rgb = REGION_PALETTE[len(legend) % len(REGION_PALETTE)]
             overlay_arr[arr] = [rgb[0], rgb[1], rgb[2], alpha]
+            if params.get("export_masks"):
+                exported_masks.append({"label": f"region {len(exported_masks)+1}", "dataUrl": encode_png_data_url(Image.fromarray(arr.astype(np.uint8) * 255, mode="L"))})
             legend.append({
                 "label": f"region {len(legend) + 1}",
                 "color": f"rgb({rgb[0]},{rgb[1]},{rgb[2]})",
@@ -108,6 +111,8 @@ class AutoMaskGenVariant(TaskVariant):
         overlay = Image.fromarray(overlay_arr, mode="RGBA")
         annotated = composite_masks(img, overlay)
         result = ok.masks(overlay, legend)
+        if params.get("export_masks"):
+            result["masks"] = exported_masks
         result["annotated"] = encode_png_data_url(annotated)
         return result
 
@@ -216,6 +221,7 @@ class PointPromptVariant(TaskVariant):
         alpha = int(params.get("overlay_alpha", 140))
         overlay_arr = np.zeros((H, W, 4), dtype=np.uint8)
         legend = []
+        exported_masks = []
         total = max(1, W * H)
 
         for i in range(per_point_masks.shape[0]):
@@ -230,6 +236,8 @@ class PointPromptVariant(TaskVariant):
             pct = 100.0 * n / total
             rgb = REGION_PALETTE[i % len(REGION_PALETTE)]
             overlay_arr[arr] = [rgb[0], rgb[1], rgb[2], alpha]
+            if params.get("export_masks"):
+                exported_masks.append({"label": f"region {len(exported_masks)+1}", "dataUrl": encode_png_data_url(Image.fromarray(arr.astype(np.uint8) * 255, mode="L"))})
             legend.append({
                 "label": f"point {i + 1} ({'include' if labels[i] == 1 else 'exclude'})",
                 "color": f"rgb({rgb[0]},{rgb[1]},{rgb[2]})",
@@ -240,6 +248,8 @@ class PointPromptVariant(TaskVariant):
         overlay = Image.fromarray(overlay_arr, mode="RGBA")
         annotated = composite_masks(img, overlay)
         result = ok.masks(overlay, legend)
+        if params.get("export_masks"):
+            result["masks"] = exported_masks
         result["annotated"] = encode_png_data_url(annotated)
         return result
 

@@ -53,8 +53,8 @@ def resolve_llm(engine, requested_model: str | None):
             try:
                 adapter = engine.ensure_loaded(name, "text-generation")
                 model_id = name
-            except Exception:
-                adapter = None
+            except Exception as exc:
+                raise LLMNotLoaded(f"Could not load requested model {name!r}: {exc}") from exc
 
     if adapter is None:
         cur = engine.current_llm_id()
@@ -88,6 +88,8 @@ def _content_to_text(content) -> str:
                 parts.append(p.get("text", ""))
             elif isinstance(p, str):
                 parts.append(p)
+            else:
+                raise ValueError("This chat endpoint accepts text content only. Use /v1/tasks/run for image understanding or audio tasks.")
         return "\n".join(parts)
     return str(content)
 
@@ -162,6 +164,8 @@ def generate_full(model, tokenizer, inputs, params: dict):
     device = next(model.parameters()).device
     inputs = _to_device(inputs, device)
     kwargs = _gen_kwargs(tokenizer, params)
+    from generation_control import stopping_criteria
+    kwargs["stopping_criteria"] = stopping_criteria()
     with torch.no_grad():
         out = model.generate(**inputs, **kwargs)
     prompt_len = _prompt_len(inputs)

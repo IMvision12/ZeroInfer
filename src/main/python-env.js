@@ -43,7 +43,7 @@ const SERVER_DEPS = [
   // ZeroInfer uses the v1 FastMCP API. MCP v2 renamed the module and changed
   // the server surface, so an unconstrained `mcp>=1.2` silently installs an
   // incompatible server that exits before ChatGPT/Claude can discover tools.
-  'mcp>=1.2,<2',
+  'mcp>=1.30,<2',
   'httpx>=0.27',                // ...which is an HTTP client of the API above
 ];
 
@@ -181,7 +181,7 @@ function uvEnv(userData) {
 function isVenvReady(userData) {
   const py = venvPython(userData);
   if (!fs.existsSync(py)) return false;
-  const r = spawnSync(py, ['-c', 'import huggingface_hub, platformdirs, psutil, fastapi, uvicorn, mcp, httpx, uv; from mcp.server.fastmcp import FastMCP'], {
+  const r = spawnSync(py, ['-c', 'import huggingface_hub, platformdirs, psutil, fastapi, uvicorn, mcp, httpx, uv; from mcp.server.fastmcp import FastMCP; from importlib.metadata import version; v = tuple(int(x) for x in version("mcp").split(".")[:2]); assert (1, 30) <= v < (2, 0)'], {
     encoding: 'utf8',
     timeout: 20000,
     windowsHide: true,

@@ -1,313 +1,437 @@
 const { useState: useStateTW, useEffect: useEffectTW, useRef: useRefTW } = React;
 
-const GEN_PARAMS = [
-  { key: 'max_new_tokens', label: 'Max new tokens', type: 'number', default: 256, min: 16,  max: 4096, step: 16, help: 'Upper bound on generated tokens. Truncates long outputs. Raise if answers are cut off.' },
-  { key: 'do_sample',      label: 'Sample (random)', type: 'boolean', default: false,                             help: 'Off → greedy (deterministic). On → uses temperature / top_p / top_k.' },
-  { key: 'temperature',    label: 'Temperature',    type: 'range',  default: 0.7, min: 0,   max: 2,    step: 0.05, help: 'Higher = more creative. Only applies when Sample is on.' },
-  { key: 'top_p',          label: 'Top-p',          type: 'range',  default: 0.95, min: 0,  max: 1,    step: 0.01, help: 'Nucleus sampling. Only applies when Sample is on.' },
-  { key: 'top_k',          label: 'Top-k',          type: 'number', default: 50,   min: 0,  max: 200,  step: 1,    help: '0 disables top-k. Only applies when Sample is on.' },
-];
+const GEN_PARAMS = window.ZeroInferParameters['text-generation'];
 const TASK_META = {
-
-  'image-segmentation':  { nm: 'Segment',     input: 'image', output: 'masks',  icon: 'eye',     accent: 'oklch(70% 0.14 155)',
-    guide: {
-      summary: 'Pixel-level segmentation. Every pixel gets a class label from the model\'s vocabulary.',
-      rows: [{ k: 'Image', v: 'JPG/PNG/WebP. Anything the model can see', req: true }],
+  "image-segmentation": {
+    "nm": "Segment",
+    "input": "image",
+    "output": "masks",
+    "icon": "eye",
+    "accent": "oklch(70% 0.14 155)",
+    "guide": {
+      "summary": "Pixel-level segmentation. Every pixel gets a class label from the model's vocabulary.",
+      "rows": [
+        {
+          "k": "Image",
+          "v": "JPG/PNG/WebP. Anything the model can see",
+          "req": true
+        }
+      ]
+    }
+  },
+  "mask-generation": {
+    "nm": "SAM Segment",
+    "input": "image",
+    "output": "masks",
+    "icon": "sparkle",
+    "accent": "oklch(72% 0.15 200)",
+    "guide": {
+      "summary": "Class-agnostic mask generation. Two modes: (1) auto: SAM samples a grid of points and outlines every distinct object. (2) point-prompted: click the image to pick specific objects.",
+      "rows": [
+        {
+          "k": "Image",
+          "v": "JPG/PNG/WebP",
+          "req": true
+        },
+        {
+          "k": "Points",
+          "v": "Optional. Click the image to include/exclude regions.",
+          "req": false
+        }
+      ]
+    }
+  },
+  "object-detection": {
+    "nm": "Detect",
+    "input": "image",
+    "output": "boxes",
+    "icon": "target",
+    "accent": "oklch(70% 0.14 155)",
+    "guide": {
+      "summary": "Draws bounding boxes around objects from the model's fixed class list.",
+      "rows": [
+        {
+          "k": "Image",
+          "v": "JPG/PNG/WebP",
+          "req": true
+        }
+      ]
+    }
+  },
+  "image-classification": {
+    "nm": "Classify",
+    "input": "image",
+    "output": "labels",
+    "icon": "eye",
+    "accent": "oklch(70% 0.14 155)",
+    "guide": {
+      "summary": "Closed-vocabulary classifier. Returns top-k labels from the model's training classes.",
+      "rows": [
+        {
+          "k": "Image",
+          "v": "JPG/PNG/WebP",
+          "req": true
+        }
+      ]
+    }
+  },
+  "image-to-text": {
+    "nm": "Describe",
+    "input": "image",
+    "output": "text",
+    "icon": "chat",
+    "accent": "oklch(70% 0.12 230)",
+    "textSlot": {
+      "label": "Prompt (optional)",
+      "placeholder": "Ask a question about the image, or leave empty for a caption.",
+      "required": false,
+      "help": "Empty → caption. With text → visual question answering."
     },
-    params: [
-
-      { key: 'oneformer_mode', label: 'OneFormer mode', type: 'select', default: 'semantic',
-        visibleWhen: (mid) => /oneformer/i.test(mid || ''),
-        help: 'OneFormer trains all three heads on one checkpoint. Pick semantic for one mask per class, instance for one mask per object, panoptic for both stuff and things.',
-        options: [
-          { value: 'semantic', label: 'Semantic' },
-          { value: 'instance', label: 'Instance' },
-          { value: 'panoptic', label: 'Panoptic' },
-        ],
-      },
-      { key: 'overlay_alpha',    label: 'Overlay opacity',       type: 'range', default: 140, min: 50, max: 255, step: 5,   help: 'Alpha of the mask overlay composited onto the image (0-255).' },
-      { key: 'legend_min_pct',   label: 'Legend min coverage %', type: 'range', default: 0.3, min: 0,  max: 5,   step: 0.1, help: 'Hide classes covering less than this percent of the image from the legend.' },
-    ]},
-  'mask-generation':     { nm: 'SAM Segment', input: 'image', output: 'masks',  icon: 'sparkle', accent: 'oklch(72% 0.15 200)',
-    guide: {
-      summary: 'Class-agnostic mask generation. Two modes: (1) auto: SAM samples a grid of points and outlines every distinct object. (2) point-prompted: click the image to pick specific objects.',
-      rows: [
-        { k: 'Image',  v: 'JPG/PNG/WebP',                                           req: true  },
-        { k: 'Points', v: 'Optional. Click the image to include/exclude regions.',  req: false },
+    "guide": {
+      "summary": "BLIP / GIT / Pix2Struct-style captioner. Describes the image, or answers a question if you provide one. Also covers TrOCR for line-level OCR (printed and handwritten).",
+      "rows": [
+        {
+          "k": "Image",
+          "v": "JPG/PNG/WebP. Also works for cropped text lines (TrOCR)",
+          "req": true
+        },
+        {
+          "k": "Prompt",
+          "v": "Optional question for VQA",
+          "req": false
+        }
+      ]
+    }
+  },
+  "depth-estimation": {
+    "nm": "Estimate depth",
+    "input": "image",
+    "output": "image",
+    "icon": "eye",
+    "accent": "oklch(70% 0.14 200)",
+    "guide": {
+      "summary": "Monocular depth estimation (DPT, MiDaS, ZoeDepth, Depth Anything v1/v2, Depth Pro). Returns a colorized depth map at the input resolution.",
+      "rows": [
+        {
+          "k": "Image",
+          "v": "JPG/PNG/WebP. Indoor or outdoor scenes work",
+          "req": true
+        }
+      ]
+    }
+  },
+  "document-question-answering": {
+    "nm": "Read document",
+    "input": "image",
+    "output": "text",
+    "icon": "chat",
+    "accent": "oklch(70% 0.12 65)",
+    "textSlot": {
+      "label": "Question (optional)",
+      "placeholder": "What is the invoice total? Leave empty to extract all text",
+      "required": false,
+      "help": "Ask a question about the document, or leave empty to OCR the page."
+    },
+    "guide": {
+      "summary": "Document AI: Donut, LayoutLMv3 and friends. Reads scanned pages, receipts, forms, and answers questions about them. For pure OCR (TrOCR-style line recognition), use the Caption tab instead.",
+      "rows": [
+        {
+          "k": "Image",
+          "v": "Scan / photo of a document, receipt, form, or page",
+          "req": true
+        },
+        {
+          "k": "Question",
+          "v": "Optional. e.g. \"Total amount?\", \"Who signed this?\"",
+          "req": false
+        }
       ],
+      "example": "What is the total amount on this receipt?"
+    }
+  },
+  "zero-shot-image-classification": {
+    "nm": "Classify (zero-shot)",
+    "input": "image",
+    "output": "labels",
+    "icon": "eye",
+    "accent": "oklch(70% 0.14 155)",
+    "textSlot": {
+      "label": "Candidate labels",
+      "placeholder": "cat, dog, a photo of a car at night",
+      "required": true,
+      "help": "Comma-separated captions. The model scores each against the image (CLIP / SigLIP / MetaCLIP)."
     },
-    params: [
-      { key: 'points_per_batch', label: 'Points per batch', type: 'number', default: 64,  min: 16, max: 256, step: 16, help: 'Auto mode only: higher = finer grid of prompt points, slower run.' },
-      { key: 'max_masks',        label: 'Max masks',        type: 'number', default: 64,  min: 4,  max: 256, step: 4,  help: 'Auto mode only: cap on returned regions.' },
-      { key: 'min_mask_pct',     label: 'Min mask %',       type: 'range',  default: 0.5, min: 0,  max: 10,  step: 0.1, help: 'Auto mode only: discard masks covering less than this percent of the image.' },
-      { key: 'overlay_alpha',    label: 'Overlay opacity',  type: 'range',  default: 140, min: 50, max: 255, step: 5,  help: 'Alpha of the mask overlay (0-255).' },
-    ]},
-  'object-detection':    { nm: 'Detect',      input: 'image', output: 'boxes',  icon: 'target',  accent: 'oklch(70% 0.14 155)',
-    guide: {
-      summary: 'Draws bounding boxes around objects from the model\'s fixed class list.',
-      rows: [{ k: 'Image', v: 'JPG/PNG/WebP', req: true }],
-    },
-    params: [
-      { key: 'threshold', label: 'Score threshold', type: 'range', default: 0.5,  min: 0, max: 1, step: 0.01, help: 'Drop detections below this confidence. Lower = more boxes, more noise.' },
-      { key: 'nms_iou',   label: 'NMS IoU',         type: 'range', default: 0.45, min: 0, max: 1, step: 0.05, help: 'IoU for non-max suppression. Higher keeps more overlapping boxes.' },
-    ]},
-  'image-classification':{ nm: 'Classify',    input: 'image', output: 'labels', icon: 'eye',     accent: 'oklch(70% 0.14 155)',
-    guide: {
-      summary: 'Closed-vocabulary classifier. Returns top-k labels from the model\'s training classes.',
-      rows: [{ k: 'Image', v: 'JPG/PNG/WebP', req: true }],
-    },
-    params: [
-      { key: 'top_k', label: 'Top-K labels', type: 'number', default: 10, min: 1, max: 50, step: 1, help: 'How many labels to return, ranked by score.' },
-    ]},
-  'image-to-text':       { nm: 'Describe',    input: 'image', output: 'text',   icon: 'chat',    accent: 'oklch(70% 0.12 230)',
-    textSlot: {
-      label: 'Prompt (optional)',
-      placeholder: 'Ask a question about the image, or leave empty for a caption.',
-      required: false,
-      help: 'Empty → caption. With text → visual question answering.',
-    },
-    guide: {
-      summary: 'BLIP / GIT / Pix2Struct-style captioner. Describes the image, or answers a question if you provide one. Also covers TrOCR for line-level OCR (printed and handwritten).',
-      rows: [
-        { k: 'Image',  v: 'JPG/PNG/WebP. Also works for cropped text lines (TrOCR)', req: true  },
-        { k: 'Prompt', v: 'Optional question for VQA',                                 req: false },
+    "guide": {
+      "summary": "CLIP-family model. Scores an image against candidate captions you supply.",
+      "rows": [
+        {
+          "k": "Image",
+          "v": "JPG/PNG/WebP",
+          "req": true
+        },
+        {
+          "k": "Candidate labels",
+          "v": "Comma-separated, e.g. \"cat, dog, a photo of a panda\"",
+          "req": true
+        }
       ],
+      "example": "cat, dog, a photo of a car at night, sunset over mountains"
+    }
+  },
+  "zero-shot-object-detection": {
+    "nm": "Detect (zero-shot)",
+    "input": "image",
+    "output": "boxes",
+    "icon": "target",
+    "accent": "oklch(70% 0.14 155)",
+    "textSlot": {
+      "label": "Candidate labels",
+      "placeholder": "car, person, license plate",
+      "required": true,
+      "help": "Comma-separated object names. OWL / Grounding-DINO localizes any that appear."
     },
-    params: [
-      { key: 'max_new_tokens', label: 'Max new tokens', type: 'number',  default: 60,  min: 16, max: 512,  step: 16,  help: 'Upper bound on the caption / answer length.' },
-      { key: 'do_sample',      label: 'Sample (random)', type: 'boolean', default: false,                             help: 'Off → greedy. On → sampled generation using temperature / top_p.' },
-      { key: 'temperature',    label: 'Temperature',    type: 'range',   default: 0.7, min: 0,  max: 2,    step: 0.05, help: 'Only applies when Sample is on.' },
-      { key: 'top_p',          label: 'Top-p',          type: 'range',   default: 0.95, min: 0, max: 1,    step: 0.01, help: 'Only applies when Sample is on.' },
-    ]},
-
-  'depth-estimation':    { nm: 'Estimate depth', input: 'image', output: 'image', icon: 'eye', accent: 'oklch(70% 0.14 200)',
-    guide: {
-      summary: 'Monocular depth estimation (DPT, MiDaS, ZoeDepth, Depth Anything v1/v2, Depth Pro). Returns a colorized depth map at the input resolution.',
-      rows: [{ k: 'Image', v: 'JPG/PNG/WebP. Indoor or outdoor scenes work', req: true }],
-    },
-    params: [
-      { key: 'invert', label: 'Invert (near = warm)',  type: 'boolean', default: false,                    help: 'Flip the colormap. Some models predict inverse depth. Toggle if near and far look swapped.' },
-      { key: 'blend',  label: 'Blend with original',   type: 'range',   default: 0,    min: 0, max: 1, step: 0.05, help: 'Alpha-blend the colored depth back onto the source image so geometry stays visible.' },
-    ]},
-
-  'document-question-answering': { nm: 'Read document', input: 'image', output: 'text', icon: 'chat', accent: 'oklch(70% 0.12 65)',
-    textSlot: {
-      label: 'Question (optional)',
-      placeholder: 'What is the invoice total? Leave empty to extract all text',
-      required: false,
-      help: 'Ask a question about the document, or leave empty to OCR the page.',
-    },
-    guide: {
-      summary: 'Document AI: Donut, LayoutLMv3 and friends. Reads scanned pages, receipts, forms, and answers questions about them. For pure OCR (TrOCR-style line recognition), use the Caption tab instead.',
-      rows: [
-        { k: 'Image',    v: 'Scan / photo of a document, receipt, form, or page',         req: true },
-        { k: 'Question', v: 'Optional. e.g. "Total amount?", "Who signed this?"',         req: false },
+    "guide": {
+      "summary": "Open-vocabulary detector. You say what to find, it draws boxes.",
+      "rows": [
+        {
+          "k": "Image",
+          "v": "JPG/PNG/WebP",
+          "req": true
+        },
+        {
+          "k": "Candidate labels",
+          "v": "Comma-separated object names, e.g. \"car, person\"",
+          "req": true
+        }
       ],
-      example: 'What is the total amount on this receipt?',
+      "example": "red car, blue car, license plate, person wearing a helmet"
+    }
+  },
+  "image-text-to-text": {
+    "nm": "Ask a VLM",
+    "input": "image",
+    "output": "text",
+    "icon": "chat",
+    "accent": "oklch(70% 0.12 230)",
+    "textSlot": {
+      "label": "Prompt (optional)",
+      "placeholder": "What's happening in this image?",
+      "required": false,
+      "help": "Empty → caption. With text → ask the VLM a question about the image."
     },
-    params: [
-      { key: 'top_k', label: 'Top-K answers', type: 'number', default: 1, min: 1, max: 10, step: 1, help: 'Return multiple candidate answers ranked by score (extractive models only).' },
-    ]},
-
-  'zero-shot-image-classification': { nm: 'Classify (zero-shot)', input: 'image', output: 'labels', icon: 'eye', accent: 'oklch(70% 0.14 155)',
-    textSlot: {
-      label: 'Candidate labels',
-      placeholder: 'cat, dog, a photo of a car at night',
-      required: true,
-      help: 'Comma-separated captions. The model scores each against the image (CLIP / SigLIP / MetaCLIP).',
-    },
-    guide: {
-      summary: 'CLIP-family model. Scores an image against candidate captions you supply.',
-      rows: [
-        { k: 'Image',            v: 'JPG/PNG/WebP',                                           req: true },
-        { k: 'Candidate labels', v: 'Comma-separated, e.g. "cat, dog, a photo of a panda"',   req: true },
+    "guide": {
+      "summary": "Vision-language model (Qwen-VL, LLaVA, Idefics, SmolVLM, Florence-2, …). Ask it about the image.",
+      "rows": [
+        {
+          "k": "Image",
+          "v": "JPG/PNG/WebP",
+          "req": true
+        },
+        {
+          "k": "Prompt",
+          "v": "Natural-language question, optional",
+          "req": false
+        }
+      ]
+    }
+  },
+  "automatic-speech-recognition": {
+    "nm": "Transcribe",
+    "input": "audio",
+    "output": "text",
+    "icon": "waveform",
+    "accent": "oklch(70% 0.13 65)",
+    "guide": {
+      "summary": "Speech-to-text (Whisper, Wav2Vec2, Parakeet, …).",
+      "rows": [
+        {
+          "k": "Audio",
+          "v": "WAV / MP3 / FLAC / OGG / M4A",
+          "req": true
+        }
+      ]
+    }
+  },
+  "text-to-speech": {
+    "nm": "Synthesize",
+    "input": "text",
+    "output": "audio",
+    "icon": "waveform",
+    "accent": "oklch(70% 0.13 65)",
+    "guide": {
+      "summary": "Text-to-speech (SpeechT5, VITS, Bark, MMS-TTS, FastSpeech2, …).",
+      "rows": [
+        {
+          "k": "Text",
+          "v": "Any length. Long inputs may be chunked",
+          "req": true
+        },
+        {
+          "k": "Voice",
+          "v": "SpeechT5 only: pick a speaker index (CMU-Arctic x-vector). Default 7306.",
+          "req": false
+        }
+      ]
+    }
+  },
+  "text-to-image": {
+    "nm": "Generate image",
+    "input": "text",
+    "output": "image",
+    "icon": "sparkle",
+    "accent": "oklch(70% 0.15 320)",
+    "guide": {
+      "summary": "Text-to-image diffusion (SD, SDXL, FLUX, …).",
+      "rows": [
+        {
+          "k": "Prompt",
+          "v": "What to paint. Longer, specific prompts work best",
+          "req": true
+        }
       ],
-      example: 'cat, dog, a photo of a car at night, sunset over mountains',
+      "example": "a cinematic photo of a red fox curled up on a moss-covered stone, golden-hour lighting, 35mm"
+    }
+  },
+  "image-to-image": {
+    "nm": "Edit image",
+    "input": "image",
+    "output": "image",
+    "icon": "sparkle",
+    "accent": "oklch(70% 0.15 320)",
+    "textSlot": {
+      "label": "Prompt",
+      "placeholder": "make it look like an oil painting, warmer lighting, add snow on the roof",
+      "required": true,
+      "help": "How to transform the source image. `strength` controls how much of the original to preserve (see parameters)."
     },
-    params: []},
-  'zero-shot-object-detection':     { nm: 'Detect (zero-shot)',   input: 'image', output: 'boxes',  icon: 'target', accent: 'oklch(70% 0.14 155)',
-    textSlot: {
-      label: 'Candidate labels',
-      placeholder: 'car, person, license plate',
-      required: true,
-      help: 'Comma-separated object names. OWL / Grounding-DINO localizes any that appear.',
-    },
-    guide: {
-      summary: 'Open-vocabulary detector. You say what to find, it draws boxes.',
-      rows: [
-        { k: 'Image',            v: 'JPG/PNG/WebP',                                       req: true },
-        { k: 'Candidate labels', v: 'Comma-separated object names, e.g. "car, person"',   req: true },
+    "guide": {
+      "summary": "Img2img diffusion. Rewrite a source image guided by a text prompt (SD, SDXL, FLUX, …).",
+      "rows": [
+        {
+          "k": "Image",
+          "v": "Source JPG/PNG/WebP",
+          "req": true
+        },
+        {
+          "k": "Prompt",
+          "v": "What to change / the target style",
+          "req": true
+        }
       ],
-      example: 'red car, blue car, license plate, person wearing a helmet',
-    },
-    params: [
-      { key: 'threshold', label: 'Score threshold', type: 'range', default: 0.1,  min: 0, max: 1, step: 0.01, help: 'Drop detections below this confidence. Zero-shot models usually need a much lower threshold than closed-set detectors.' },
-      { key: 'nms_iou',   label: 'NMS IoU',         type: 'range', default: 0.45, min: 0, max: 1, step: 0.05, help: 'IoU for non-max suppression. Higher keeps more overlapping boxes.' },
-    ]},
-
-  'image-text-to-text':  { nm: 'Ask a VLM', input: 'image', output: 'text', icon: 'chat', accent: 'oklch(70% 0.12 230)',
-    textSlot: {
-      label: 'Prompt (optional)',
-      placeholder: "What's happening in this image?",
-      required: false,
-      help: 'Empty → caption. With text → ask the VLM a question about the image.',
-    },
-    guide: {
-      summary: 'Vision-language model (Qwen-VL, LLaVA, Idefics, SmolVLM, Florence-2, …). Ask it about the image.',
-      rows: [
-        { k: 'Image',  v: 'JPG/PNG/WebP',                        req: true  },
-        { k: 'Prompt', v: 'Natural-language question, optional', req: false },
-      ],
-    },
-    params: [
-      { key: 'max_new_tokens', label: 'Max new tokens', type: 'number',  default: 512, min: 32, max: 2048, step: 32,  help: 'Upper bound on generated tokens.' },
-      { key: 'do_sample',      label: 'Sample (random)', type: 'boolean', default: false,                             help: 'Off → greedy. On → sampled generation.' },
-      { key: 'temperature',    label: 'Temperature',    type: 'range',   default: 0.7, min: 0,  max: 2,    step: 0.05, help: 'Only applies when Sample is on.' },
-      { key: 'top_p',          label: 'Top-p',          type: 'range',   default: 0.95, min: 0, max: 1,    step: 0.01, help: 'Only applies when Sample is on.' },
-
-
-
-      { key: 'florence_task', label: 'Florence-2 task', type: 'select', default: '<CAPTION>',
-        visibleWhen: (mid) => /florence-?2/i.test(mid || ''),
-        help: 'Florence-2 routes behavior via task tokens. Some tokens (CAPTION_TO_PHRASE_GROUNDING, REFERRING_EXPRESSION_SEGMENTATION, OPEN_VOCABULARY_DETECTION) also use the Prompt field as the phrase/expression to ground.',
-        options: [
-          { value: '<CAPTION>',                            label: 'Caption (short)' },
-          { value: '<DETAILED_CAPTION>',                   label: 'Caption (detailed)' },
-          { value: '<MORE_DETAILED_CAPTION>',              label: 'Caption (more detailed)' },
-          { value: '<OD>',                                 label: 'Object detection' },
-          { value: '<DENSE_REGION_CAPTION>',               label: 'Dense region captions' },
-          { value: '<REGION_PROPOSAL>',                    label: 'Region proposals' },
-          { value: '<CAPTION_TO_PHRASE_GROUNDING>',        label: 'Phrase grounding (uses prompt)' },
-          { value: '<REFERRING_EXPRESSION_SEGMENTATION>',  label: 'Referring segmentation (uses prompt)' },
-          { value: '<OPEN_VOCABULARY_DETECTION>',          label: 'Open-vocab detection (uses prompt)' },
-          { value: '<OCR>',                                label: 'OCR (plain text)' },
-          { value: '<OCR_WITH_REGION>',                    label: 'OCR with regions' },
-        ],
-      },
-    ]},
-
-  'automatic-speech-recognition': { nm: 'Transcribe', input: 'audio', output: 'text',  icon: 'waveform', accent: 'oklch(70% 0.13 65)',
-    guide: {
-      summary: 'Speech-to-text (Whisper, Wav2Vec2, Parakeet, …).',
-      rows: [{ k: 'Audio', v: 'WAV / MP3 / FLAC / OGG / M4A', req: true }],
-    },
-    params: [
-
-      { key: 'whisper_mode', label: 'Whisper mode', type: 'select', default: 'transcribe',
-        visibleWhen: (mid) => /whisper/i.test(mid || ''),
-        help: 'Translate forces output to English regardless of source language. Whisper-only.',
-        options: [
-          { value: 'transcribe', label: 'Transcribe (preserve source language)' },
-          { value: 'translate',  label: 'Translate to English' },
-        ],
-      },
-      { key: 'chunk_length_s',    label: 'Chunk length (s)',  type: 'number',  default: 30,    min: 5,  max: 60, step: 1, help: 'Whisper\'s 30s context window. Only used for long-audio (>30s) variant.' },
-      { key: 'stride_length_s',   label: 'Stride length (s)', type: 'number',  default: 5,     min: 0,  max: 15, step: 1, help: 'Overlap between chunks. Helps stitch words across boundaries.' },
-      { key: 'return_timestamps', label: 'Return timestamps', type: 'boolean', default: false,                            help: 'Attach per-segment (or per-word) timestamps in the output.' },
-    ]},
-  'text-to-speech':               { nm: 'Synthesize', input: 'text',  output: 'audio', icon: 'waveform', accent: 'oklch(70% 0.13 65)',
-    guide: {
-      summary: 'Text-to-speech (SpeechT5, VITS, Bark, MMS-TTS, FastSpeech2, …).',
-      rows: [
-        { k: 'Text',   v: 'Any length. Long inputs may be chunked',                                              req: true  },
-        { k: 'Voice',  v: 'SpeechT5 only: pick a speaker index (CMU-Arctic x-vector). Default 7306.',             req: false },
-      ],
-    },
-    params: [
-      { key: 'speaker_index', label: 'Speaker index', type: 'number', default: 7306, min: 0, max: 7930, step: 1,
-        visibleWhen: (mid) => /speecht5/i.test(mid || ''),
-        help: 'SpeechT5 only. The CMU-Arctic dataset has 7931 x-vectors (0-7930). 7306 is the HF default (clear female voice). Try other indices for different speakers.' },
-    ]},
-
-  'text-to-image': { nm: 'Generate image', input: 'text', output: 'image', icon: 'sparkle', accent: 'oklch(70% 0.15 320)',
-    guide: {
-      summary: 'Text-to-image diffusion (SD, SDXL, FLUX, …).',
-      rows: [{ k: 'Prompt', v: 'What to paint. Longer, specific prompts work best', req: true }],
-      example: 'a cinematic photo of a red fox curled up on a moss-covered stone, golden-hour lighting, 35mm',
-    },
-    params: [
-      { key: 'num_inference_steps', label: 'Inference steps',  type: 'number', default: 20,  min: 1,  max: 100, step: 1,   help: 'More steps → higher quality, linearly slower. 20-30 is a sweet spot for most SDXL / SD models; FLUX works at 4-8.' },
-      { key: 'guidance_scale',      label: 'Guidance scale',   type: 'range',  default: 7.5, min: 0,  max: 20,  step: 0.5, help: 'Classifier-free guidance. Higher = stricter prompt adherence, less diversity.' },
-      { key: 'negative_prompt',     label: 'Negative prompt',  type: 'text',   default: '',                                help: 'Things to steer AWAY from. e.g. "blurry, extra fingers, watermark".' },
-    ]},
-  'image-to-image': { nm: 'Edit image', input: 'image', output: 'image', icon: 'sparkle', accent: 'oklch(70% 0.15 320)',
-    textSlot: {
-      label: 'Prompt',
-      placeholder: 'make it look like an oil painting, warmer lighting, add snow on the roof',
-      required: true,
-      help: 'How to transform the source image. `strength` controls how much of the original to preserve (see parameters).',
-    },
-    guide: {
-      summary: 'Img2img diffusion. Rewrite a source image guided by a text prompt (SD, SDXL, FLUX, …).',
-      rows: [
-        { k: 'Image',  v: 'Source JPG/PNG/WebP',                      req: true },
-        { k: 'Prompt', v: 'What to change / the target style',         req: true },
-      ],
-      example: 'cyberpunk cityscape at night, neon reflections, heavy rain',
-    },
-    params: [
-      { key: 'strength',            label: 'Strength',         type: 'range',  default: 0.8, min: 0,  max: 1,   step: 0.05, help: 'How much to transform: 0 = original image unchanged, 1 = fully regenerated from prompt.' },
-      { key: 'num_inference_steps', label: 'Inference steps',  type: 'number', default: 20,  min: 1,  max: 100, step: 1,    help: 'More steps → higher quality, linearly slower.' },
-      { key: 'guidance_scale',      label: 'Guidance scale',   type: 'range',  default: 7.5, min: 0,  max: 20,  step: 0.5,  help: 'Classifier-free guidance. Higher = stricter prompt adherence.' },
-      { key: 'negative_prompt',     label: 'Negative prompt',  type: 'text',   default: '',                                help: 'Things to steer AWAY from.' },
-    ]},
-
-  'text-generation':     { nm: 'Generate',  input: 'text', output: 'text',   icon: 'chat', accent: 'oklch(70% 0.12 230)',
-    guide: {
-      summary: 'Causal LM (Llama, Qwen, Mistral, Phi, Gemma, …).',
-      rows: [{ k: 'Prompt', v: 'Any text. The model continues from it', req: true }],
-    },
-    params: GEN_PARAMS},
-  'text2text-generation':{ nm: 'Rewrite',   input: 'text', output: 'text',   icon: 'chat', accent: 'oklch(70% 0.12 230)',
-    guide: {
-      summary: 'Encoder-decoder seq2seq rewrite.',
-      rows: [{ k: 'Text', v: 'Input sequence to transform', req: true }],
-    },
-    params: GEN_PARAMS},
-  'translation':         { nm: 'Translate', input: 'text', output: 'text',   icon: 'chat', accent: 'oklch(70% 0.12 230)',
-    guide: {
-      summary: 'Translation model (Marian, NLLB, M2M-100, FSMT).',
-      rows: [
-        { k: 'Text',     v: 'Sentence or paragraph in the source language',                          req: true  },
-        { k: 'Src / Tgt', v: 'NLLB and M2M-100 need language codes (see params). Marian is fixed-pair.', req: false },
-      ],
-    },
-    params: [
-      ...GEN_PARAMS,
-      { key: 'src_lang', label: 'Source language', type: 'text', default: '',
-        help: 'NLLB and M2M-100 only. NLLB codes: "eng_Latn", "fra_Latn", "hin_Deva". M2M-100 codes: "en", "fr". Leave empty for Marian (fixed-pair).' },
-      { key: 'tgt_lang', label: 'Target language', type: 'text', default: '',
-        help: 'Same format as source. Check the model card for valid codes.' },
-    ]},
-  'summarization':       { nm: 'Summarize', input: 'text', output: 'text',   icon: 'chat', accent: 'oklch(70% 0.12 230)',
-    guide: {
-      summary: 'Abstractive summarizer.',
-      rows: [{ k: 'Text', v: 'The passage to summarize', req: true }],
-    },
-    params: GEN_PARAMS},
-  'feature-extraction':  { nm: 'Embed',     input: 'text', output: 'vector', icon: 'embed', accent: 'oklch(70% 0.10 250)',
-    guide: {
-      summary: 'Text embeddings (sentence-transformers, BGE, E5, GTE, MiniLM, Nomic, …).',
-      rows: [{ k: 'Text', v: 'A sentence or passage to embed', req: true }],
-    },
-    params: [
-      { key: 'normalize',  label: 'Normalize (unit length)', type: 'boolean', default: true,
-        help: 'L2-normalize the vector so cosine similarity is a plain dot product. Cosine similarity then reduces to a plain dot product.' },
-      { key: 'dimensions', label: 'Dimensions', type: 'number', default: 0, min: 0, max: 4096, step: 1,
-        help: 'Truncate to the first N dimensions (Matryoshka models like nomic-embed / text-embedding-3). 0 = full size.' },
-    ]},
-  'sentence-similarity': { nm: 'Embed',     input: 'text', output: 'vector', icon: 'embed', accent: 'oklch(70% 0.10 250)',
-    guide: {
-      summary: 'Text embeddings (sentence-transformers, BGE, E5, GTE, MiniLM, Nomic, …).',
-      rows: [{ k: 'Text', v: 'A sentence or passage to embed', req: true }],
-    },
-    params: [
-      { key: 'normalize',  label: 'Normalize (unit length)', type: 'boolean', default: true,
-        help: 'L2-normalize the vector so cosine similarity is a plain dot product. Cosine similarity then reduces to a plain dot product.' },
-      { key: 'dimensions', label: 'Dimensions', type: 'number', default: 0, min: 0, max: 4096, step: 1,
-        help: 'Truncate to the first N dimensions (Matryoshka models like nomic-embed / text-embedding-3). 0 = full size.' },
-    ]},
+      "example": "cyberpunk cityscape at night, neon reflections, heavy rain"
+    }
+  },
+  "text-generation": {
+    "nm": "Generate",
+    "input": "text",
+    "output": "text",
+    "icon": "chat",
+    "accent": "oklch(70% 0.12 230)",
+    "guide": {
+      "summary": "Causal LM (Llama, Qwen, Mistral, Phi, Gemma, …).",
+      "rows": [
+        {
+          "k": "Prompt",
+          "v": "Any text. The model continues from it",
+          "req": true
+        }
+      ]
+    }
+  },
+  "text2text-generation": {
+    "nm": "Rewrite",
+    "input": "text",
+    "output": "text",
+    "icon": "chat",
+    "accent": "oklch(70% 0.12 230)",
+    "guide": {
+      "summary": "Encoder-decoder seq2seq rewrite.",
+      "rows": [
+        {
+          "k": "Text",
+          "v": "Input sequence to transform",
+          "req": true
+        }
+      ]
+    }
+  },
+  "translation": {
+    "nm": "Translate",
+    "input": "text",
+    "output": "text",
+    "icon": "chat",
+    "accent": "oklch(70% 0.12 230)",
+    "guide": {
+      "summary": "Translation model (Marian, NLLB, M2M-100, FSMT).",
+      "rows": [
+        {
+          "k": "Text",
+          "v": "Sentence or paragraph in the source language",
+          "req": true
+        },
+        {
+          "k": "Src / Tgt",
+          "v": "NLLB and M2M-100 need language codes (see params). Marian is fixed-pair.",
+          "req": false
+        }
+      ]
+    }
+  },
+  "summarization": {
+    "nm": "Summarize",
+    "input": "text",
+    "output": "text",
+    "icon": "chat",
+    "accent": "oklch(70% 0.12 230)",
+    "guide": {
+      "summary": "Abstractive summarizer.",
+      "rows": [
+        {
+          "k": "Text",
+          "v": "The passage to summarize",
+          "req": true
+        }
+      ]
+    }
+  },
+  "feature-extraction": {
+    "nm": "Embed",
+    "input": "text",
+    "output": "vector",
+    "icon": "embed",
+    "accent": "oklch(70% 0.10 250)",
+    "guide": {
+      "summary": "Text embeddings (sentence-transformers, BGE, E5, GTE, MiniLM, Nomic, …).",
+      "rows": [
+        {
+          "k": "Text",
+          "v": "A sentence or passage to embed",
+          "req": true
+        }
+      ]
+    }
+  },
+  "sentence-similarity": {
+    "nm": "Embed",
+    "input": "text",
+    "output": "vector",
+    "icon": "embed",
+    "accent": "oklch(70% 0.10 250)",
+    "guide": {
+      "summary": "Text embeddings (sentence-transformers, BGE, E5, GTE, MiniLM, Nomic, …).",
+      "rows": [
+        {
+          "k": "Text",
+          "v": "A sentence or passage to embed",
+          "req": true
+        }
+      ]
+    }
+  }
 };
+for (const [task, meta] of Object.entries(TASK_META)) {
+  meta.params = (window.ZeroInferParameters[task] || []).map(p => ({...p, ...(p.model_pattern ? {visibleWhen: mid => new RegExp(p.model_pattern, 'i').test(mid || '')} : {})}));
+}
 
 function resolveTaskMeta(task) {
   return TASK_META[task] || { nm: task || 'Run', input: 'text', output: 'text', icon: 'cube', accent: 'oklch(70% 0.10 250)' };
@@ -1232,6 +1356,7 @@ function RunCard({ run, meta, modelId }) {
 }
 
 function OutputView({ output, meta, input, modelId }) {
+  if (output.kind === 'multimodal') return <div>{(output.items || []).map((item, index) => <OutputView key={index} output={item} meta={meta} input={input} modelId={modelId}/>)}</div>;
   if (output.kind === 'boxes') {
     // Prefer the server-rendered annotated PNG; fall back to SVG for legacy outputs.
     if (output.annotated) {
@@ -1291,7 +1416,7 @@ function OutputView({ output, meta, input, modelId }) {
     );
   }
   if (output.kind === 'text') {
-    return <div className="tw-output-text">{output.text}</div>;
+    return <div className="tw-output-text">{output.text}{output.segments?.length > 0 && <div className="tw-transcript-segments">{output.segments.map((segment, i) => <div key={i}>[{segment.start ?? "?"}–{segment.end ?? "?"} s] {segment.text}</div>)}</div>}</div>;
   }
   if (output.kind === 'image') {
     const saveGenerated = () => {

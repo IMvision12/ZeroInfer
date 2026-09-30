@@ -47,11 +47,31 @@ class DiffusersAdapter(Adapter):
                   if k in params}
         kwargs.setdefault("num_inference_steps", 20)
         kwargs.setdefault("guidance_scale", 7.5)
+        if params.get("seed") is not None:
+            import torch
+            kwargs["generator"] = torch.Generator(device="cpu").manual_seed(int(params["seed"]))
 
         if self.task == "image-to-image" and inputs.get("dataUrl"):
             kwargs["image"] = decode_image(inputs["dataUrl"])
         elif self.task == "inpainting" and inputs.get("dataUrl"):
             kwargs["image"] = decode_image(inputs["dataUrl"])
+            if not inputs.get("maskDataUrl"):
+                raise ValueError("Inpainting requires maskDataUrl (white pixels are replaced)")
+            kwargs["mask_image"] = decode_image(inputs["maskDataUrl"]).convert("L")
+        if self.task in ("image-to-image", "inpainting") and "image" not in kwargs:
+            raise ValueError("This task requires an input image")
+
+        # Supported diffusers pipelines check cancellation between denoising steps.
+        import inspect
+        if "callback_on_step_end" in inspect.signature(self.pipe.__call__).parameters:
+            def step_end(pipe, step, timestep, callback_kwargs):
+                from runtime import stop_requested
+                if params.get("_progress"):
+                    params["_progress"](step + 1, kwargs["num_inference_steps"])
+                if stop_requested():
+                    raise RuntimeError("Inference cancelled")
+                return callback_kwargs
+            kwargs["callback_on_step_end"] = step_end
 
         result = self.pipe(prompt, **kwargs)
         image = result.images[0]

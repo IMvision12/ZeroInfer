@@ -35,11 +35,6 @@ function Settings({ open, onClose, initialSection, preferences, onSavePreference
     if (saving) return;
     setSaving(true); setError('');
     try {
-      const tokens = Number(draft.maxNewTokens), temperature = Number(draft.temperature);
-      if (!String(draft.maxNewTokens).trim() || !Number.isInteger(tokens) || tokens < 16 || tokens > 8192)
-        throw new Error('Maximum response tokens must be a whole number between 16 and 8,192.');
-      if (!String(draft.temperature).trim() || !Number.isFinite(temperature) || temperature < 0 || temperature > 2)
-        throw new Error('Temperature must be a number between 0 and 2.');
       const next = ZeroPreferences.normalize(draft);
       const patch = Object.fromEntries(Object.entries(next).filter(([key, value]) => value !== saved[key]));
       await onSavePreferences(patch);
@@ -130,9 +125,5 @@ function PersonalizationSettings({ draft, change }) {
       </SettingGroup>
       <SettingGroup title="About you"><label className="setting-label" htmlFor="settings-nickname">Nickname</label><input id="settings-nickname" className="setting-input" maxLength={80} placeholder="What should models call you?" value={draft.nickname} onChange={e => change({ nickname: e.target.value })}/></SettingGroup>
     </fieldset>
-    <SettingGroup title="Chat generation" description="Defaults for text responses in the chat workspace.">
-      <SettingRow title="Maximum response tokens" sub="Longer responses take more time and memory."><input className="setting-input short" type="number" aria-label="Maximum response tokens" min={16} max={8192} step={16} value={draft.maxNewTokens} onChange={e => change({ maxNewTokens: e.target.value })}/></SettingRow>
-      <SettingRow title="Temperature" sub="Lower values are more predictable. Zero uses greedy decoding."><input className="setting-input short" type="number" aria-label="Temperature" min={0} max={2} step={0.1} value={draft.temperature} onChange={e => change({ temperature: e.target.value })}/></SettingRow>
-    </SettingGroup>
   </>;
 }

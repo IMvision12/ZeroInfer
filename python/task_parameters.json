@@ -1,0 +1,766 @@
+{
+  "image-segmentation": [
+    {
+      "key": "oneformer_mode",
+      "label": "OneFormer mode",
+      "type": "select",
+      "default": "semantic",
+      "help": "OneFormer trains all three heads on one checkpoint. Pick semantic for one mask per class, instance for one mask per object, panoptic for both stuff and things.",
+      "options": [
+        {
+          "value": "semantic",
+          "label": "Semantic"
+        },
+        {
+          "value": "instance",
+          "label": "Instance"
+        },
+        {
+          "value": "panoptic",
+          "label": "Panoptic"
+        }
+      ],
+      "model_pattern": "oneformer"
+    },
+    {
+      "key": "overlay_alpha",
+      "label": "Overlay opacity",
+      "type": "range",
+      "default": 140,
+      "min": 50,
+      "max": 255,
+      "step": 5,
+      "help": "Alpha of the mask overlay composited onto the image (0-255)."
+    },
+    {
+      "key": "legend_min_pct",
+      "label": "Legend min coverage %",
+      "type": "range",
+      "default": 0.3,
+      "min": 0,
+      "max": 5,
+      "step": 0.1,
+      "help": "Hide classes covering less than this percent of the image from the legend."
+    },
+    {
+      "key": "export_masks",
+      "label": "Export individual masks",
+      "type": "boolean",
+      "default": false,
+      "help": "Include mask images in the result."
+    }
+  ],
+  "mask-generation": [
+    {
+      "key": "points_per_batch",
+      "label": "Points per batch",
+      "type": "number",
+      "default": 64,
+      "min": 16,
+      "max": 256,
+      "step": 16,
+      "help": "Auto mode only: higher = finer grid of prompt points, slower run."
+    },
+    {
+      "key": "max_masks",
+      "label": "Max masks",
+      "type": "number",
+      "default": 64,
+      "min": 4,
+      "max": 256,
+      "step": 4,
+      "help": "Auto mode only: cap on returned regions."
+    },
+    {
+      "key": "min_mask_pct",
+      "label": "Min mask %",
+      "type": "range",
+      "default": 0.5,
+      "min": 0,
+      "max": 10,
+      "step": 0.1,
+      "help": "Auto mode only: discard masks covering less than this percent of the image."
+    },
+    {
+      "key": "overlay_alpha",
+      "label": "Overlay opacity",
+      "type": "range",
+      "default": 140,
+      "min": 50,
+      "max": 255,
+      "step": 5,
+      "help": "Alpha of the mask overlay (0-255)."
+    },
+    {
+      "key": "export_masks",
+      "label": "Export individual masks",
+      "type": "boolean",
+      "default": false,
+      "help": "Include mask images in the result."
+    }
+  ],
+  "object-detection": [
+    {
+      "key": "threshold",
+      "label": "Score threshold",
+      "type": "range",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "help": "Drop detections below this confidence. Lower = more boxes, more noise."
+    },
+    {
+      "key": "nms_iou",
+      "label": "NMS IoU",
+      "type": "range",
+      "default": 0.45,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "help": "IoU for non-max suppression. Higher keeps more overlapping boxes."
+    }
+  ],
+  "image-classification": [
+    {
+      "key": "top_k",
+      "label": "Top-K labels",
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "help": "How many labels to return, ranked by score."
+    }
+  ],
+  "image-to-text": [
+    {
+      "key": "max_new_tokens",
+      "label": "Max new tokens",
+      "type": "number",
+      "default": 60,
+      "min": 16,
+      "max": 512,
+      "step": 16,
+      "help": "Upper bound on the caption / answer length."
+    },
+    {
+      "key": "do_sample",
+      "label": "Sample (random)",
+      "type": "boolean",
+      "default": false,
+      "help": "Off â†’ greedy. On â†’ sampled generation using temperature / top_p."
+    },
+    {
+      "key": "temperature",
+      "label": "Temperature",
+      "type": "range",
+      "default": 0.7,
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "help": "Only applies when Sample is on."
+    },
+    {
+      "key": "top_p",
+      "label": "Top-p",
+      "type": "range",
+      "default": 0.95,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "help": "Only applies when Sample is on."
+    }
+  ],
+  "depth-estimation": [
+    {
+      "key": "invert",
+      "label": "Invert (near = warm)",
+      "type": "boolean",
+      "default": false,
+      "help": "Flip the colormap. Some models predict inverse depth. Toggle if near and far look swapped."
+    },
+    {
+      "key": "blend",
+      "label": "Blend with original",
+      "type": "range",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "help": "Alpha-blend the colored depth back onto the source image so geometry stays visible."
+    }
+  ],
+  "document-question-answering": [
+    {
+      "key": "top_k",
+      "label": "Top-K answers",
+      "type": "number",
+      "default": 1,
+      "min": 1,
+      "max": 10,
+      "step": 1,
+      "help": "Return multiple candidate answers ranked by score (extractive models only)."
+    }
+  ],
+  "zero-shot-image-classification": [],
+  "zero-shot-object-detection": [
+    {
+      "key": "threshold",
+      "label": "Score threshold",
+      "type": "range",
+      "default": 0.1,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "help": "Drop detections below this confidence. Zero-shot models usually need a much lower threshold than closed-set detectors."
+    },
+    {
+      "key": "nms_iou",
+      "label": "NMS IoU",
+      "type": "range",
+      "default": 0.45,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "help": "IoU for non-max suppression. Higher keeps more overlapping boxes."
+    }
+  ],
+  "image-text-to-text": [
+    {
+      "key": "max_new_tokens",
+      "label": "Max new tokens",
+      "type": "number",
+      "default": 512,
+      "min": 32,
+      "max": 2048,
+      "step": 32,
+      "help": "Upper bound on generated tokens."
+    },
+    {
+      "key": "do_sample",
+      "label": "Sample (random)",
+      "type": "boolean",
+      "default": false,
+      "help": "Off â†’ greedy. On â†’ sampled generation."
+    },
+    {
+      "key": "temperature",
+      "label": "Temperature",
+      "type": "range",
+      "default": 0.7,
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "help": "Only applies when Sample is on."
+    },
+    {
+      "key": "top_p",
+      "label": "Top-p",
+      "type": "range",
+      "default": 0.95,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "help": "Only applies when Sample is on."
+    },
+    {
+      "key": "florence_task",
+      "label": "Florence-2 task",
+      "type": "select",
+      "default": "<CAPTION>",
+      "help": "Florence-2 routes behavior via task tokens. Some tokens (CAPTION_TO_PHRASE_GROUNDING, REFERRING_EXPRESSION_SEGMENTATION, OPEN_VOCABULARY_DETECTION) also use the Prompt field as the phrase/expression to ground.",
+      "options": [
+        {
+          "value": "<CAPTION>",
+          "label": "Caption (short)"
+        },
+        {
+          "value": "<DETAILED_CAPTION>",
+          "label": "Caption (detailed)"
+        },
+        {
+          "value": "<MORE_DETAILED_CAPTION>",
+          "label": "Caption (more detailed)"
+        },
+        {
+          "value": "<OD>",
+          "label": "Object detection"
+        },
+        {
+          "value": "<DENSE_REGION_CAPTION>",
+          "label": "Dense region captions"
+        },
+        {
+          "value": "<REGION_PROPOSAL>",
+          "label": "Region proposals"
+        },
+        {
+          "value": "<CAPTION_TO_PHRASE_GROUNDING>",
+          "label": "Phrase grounding (uses prompt)"
+        },
+        {
+          "value": "<REFERRING_EXPRESSION_SEGMENTATION>",
+          "label": "Referring segmentation (uses prompt)"
+        },
+        {
+          "value": "<OPEN_VOCABULARY_DETECTION>",
+          "label": "Open-vocab detection (uses prompt)"
+        },
+        {
+          "value": "<OCR>",
+          "label": "OCR (plain text)"
+        },
+        {
+          "value": "<OCR_WITH_REGION>",
+          "label": "OCR with regions"
+        }
+      ],
+      "model_pattern": "florence"
+    }
+  ],
+  "automatic-speech-recognition": [
+    {
+      "key": "whisper_mode",
+      "label": "Whisper mode",
+      "type": "select",
+      "default": "transcribe",
+      "help": "Translate forces output to English regardless of source language. Whisper-only.",
+      "options": [
+        {
+          "value": "transcribe",
+          "label": "Transcribe (preserve source language)"
+        },
+        {
+          "value": "translate",
+          "label": "Translate to English"
+        }
+      ]
+    },
+    {
+      "key": "chunk_length_s",
+      "label": "Chunk length (s)",
+      "type": "number",
+      "default": 30,
+      "min": 5,
+      "max": 60,
+      "step": 1,
+      "help": "Whisper's 30s context window. Only used for long-audio (>30s) variant."
+    },
+    {
+      "key": "stride_length_s",
+      "label": "Stride length (s)",
+      "type": "number",
+      "default": 5,
+      "min": 0,
+      "max": 15,
+      "step": 1,
+      "help": "Overlap between chunks. Helps stitch words across boundaries."
+    },
+    {
+      "key": "return_timestamps",
+      "label": "Return timestamps",
+      "type": "boolean",
+      "default": false,
+      "help": "Attach per-segment (or per-word) timestamps in the output."
+    }
+  ],
+  "text-to-speech": [
+    {
+      "key": "speaker_index",
+      "label": "Speaker index",
+      "type": "number",
+      "default": 7306,
+      "min": 0,
+      "max": 7930,
+      "step": 1,
+      "help": "SpeechT5 only. The CMU-Arctic dataset has 7931 x-vectors (0-7930). 7306 is the HF default (clear female voice). Try other indices for different speakers.",
+      "model_pattern": "speecht5"
+    }
+  ],
+  "text-to-image": [
+    {
+      "key": "num_inference_steps",
+      "label": "Inference steps",
+      "type": "number",
+      "default": 20,
+      "min": 1,
+      "max": 100,
+      "step": 1,
+      "help": "More steps â†’ higher quality, linearly slower. 20-30 is a sweet spot for most SDXL / SD models; FLUX works at 4-8."
+    },
+    {
+      "key": "guidance_scale",
+      "label": "Guidance scale",
+      "type": "range",
+      "default": 7.5,
+      "min": 0,
+      "max": 20,
+      "step": 0.5,
+      "help": "Classifier-free guidance. Higher = stricter prompt adherence, less diversity."
+    },
+    {
+      "key": "negative_prompt",
+      "label": "Negative prompt",
+      "type": "text",
+      "default": "",
+      "help": "Things to steer AWAY from. e.g. \"blurry, extra fingers, watermark\"."
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 4294967295,
+      "step": 1,
+      "help": "Use the same seed and parameters to reproduce a run on the same runtime."
+    }
+  ],
+  "image-to-image": [
+    {
+      "key": "strength",
+      "label": "Strength",
+      "type": "range",
+      "default": 0.8,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "help": "How much to transform: 0 = original image unchanged, 1 = fully regenerated from prompt."
+    },
+    {
+      "key": "num_inference_steps",
+      "label": "Inference steps",
+      "type": "number",
+      "default": 20,
+      "min": 1,
+      "max": 100,
+      "step": 1,
+      "help": "More steps â†’ higher quality, linearly slower."
+    },
+    {
+      "key": "guidance_scale",
+      "label": "Guidance scale",
+      "type": "range",
+      "default": 7.5,
+      "min": 0,
+      "max": 20,
+      "step": 0.5,
+      "help": "Classifier-free guidance. Higher = stricter prompt adherence."
+    },
+    {
+      "key": "negative_prompt",
+      "label": "Negative prompt",
+      "type": "text",
+      "default": "",
+      "help": "Things to steer AWAY from."
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 4294967295,
+      "step": 1,
+      "help": "Use the same seed and parameters to reproduce a run on the same runtime."
+    }
+  ],
+  "text-generation": [
+    {
+      "key": "max_new_tokens",
+      "label": "Max new tokens",
+      "type": "number",
+      "default": 256,
+      "min": 16,
+      "max": 4096,
+      "step": 16,
+      "help": "Upper bound on generated tokens. Truncates long outputs. Raise if answers are cut off."
+    },
+    {
+      "key": "do_sample",
+      "label": "Sample (random)",
+      "type": "boolean",
+      "default": false,
+      "help": "Off â†’ greedy (deterministic). On â†’ uses temperature / top_p / top_k."
+    },
+    {
+      "key": "temperature",
+      "label": "Temperature",
+      "type": "range",
+      "default": 0.7,
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "help": "Higher = more creative. Only applies when Sample is on."
+    },
+    {
+      "key": "top_p",
+      "label": "Top-p",
+      "type": "range",
+      "default": 0.95,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "help": "Nucleus sampling. Only applies when Sample is on."
+    },
+    {
+      "key": "top_k",
+      "label": "Top-k",
+      "type": "number",
+      "default": 50,
+      "min": 0,
+      "max": 200,
+      "step": 1,
+      "help": "0 disables top-k. Only applies when Sample is on."
+    }
+  ],
+  "text2text-generation": [
+    {
+      "key": "max_new_tokens",
+      "label": "Max new tokens",
+      "type": "number",
+      "default": 256,
+      "min": 16,
+      "max": 4096,
+      "step": 16,
+      "help": "Upper bound on generated tokens. Truncates long outputs. Raise if answers are cut off."
+    },
+    {
+      "key": "do_sample",
+      "label": "Sample (random)",
+      "type": "boolean",
+      "default": false,
+      "help": "Off â†’ greedy (deterministic). On â†’ uses temperature / top_p / top_k."
+    },
+    {
+      "key": "temperature",
+      "label": "Temperature",
+      "type": "range",
+      "default": 0.7,
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "help": "Higher = more creative. Only applies when Sample is on."
+    },
+    {
+      "key": "top_p",
+      "label": "Top-p",
+      "type": "range",
+      "default": 0.95,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "help": "Nucleus sampling. Only applies when Sample is on."
+    },
+    {
+      "key": "top_k",
+      "label": "Top-k",
+      "type": "number",
+      "default": 50,
+      "min": 0,
+      "max": 200,
+      "step": 1,
+      "help": "0 disables top-k. Only applies when Sample is on."
+    }
+  ],
+  "translation": [
+    {
+      "key": "max_new_tokens",
+      "label": "Max new tokens",
+      "type": "number",
+      "default": 256,
+      "min": 16,
+      "max": 4096,
+      "step": 16,
+      "help": "Upper bound on generated tokens. Truncates long outputs. Raise if answers are cut off."
+    },
+    {
+      "key": "do_sample",
+      "label": "Sample (random)",
+      "type": "boolean",
+      "default": false,
+      "help": "Off â†’ greedy (deterministic). On â†’ uses temperature / top_p / top_k."
+    },
+    {
+      "key": "temperature",
+      "label": "Temperature",
+      "type": "range",
+      "default": 0.7,
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "help": "Higher = more creative. Only applies when Sample is on."
+    },
+    {
+      "key": "top_p",
+      "label": "Top-p",
+      "type": "range",
+      "default": 0.95,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "help": "Nucleus sampling. Only applies when Sample is on."
+    },
+    {
+      "key": "top_k",
+      "label": "Top-k",
+      "type": "number",
+      "default": 50,
+      "min": 0,
+      "max": 200,
+      "step": 1,
+      "help": "0 disables top-k. Only applies when Sample is on."
+    },
+    {
+      "key": "src_lang",
+      "label": "Source language",
+      "type": "text",
+      "default": "",
+      "help": "NLLB and M2M-100 only. NLLB codes: \"eng_Latn\", \"fra_Latn\", \"hin_Deva\". M2M-100 codes: \"en\", \"fr\". Leave empty for Marian (fixed-pair)."
+    },
+    {
+      "key": "tgt_lang",
+      "label": "Target language",
+      "type": "text",
+      "default": "",
+      "help": "Same format as source. Check the model card for valid codes."
+    }
+  ],
+  "summarization": [
+    {
+      "key": "max_new_tokens",
+      "label": "Max new tokens",
+      "type": "number",
+      "default": 256,
+      "min": 16,
+      "max": 4096,
+      "step": 16,
+      "help": "Upper bound on generated tokens. Truncates long outputs. Raise if answers are cut off."
+    },
+    {
+      "key": "do_sample",
+      "label": "Sample (random)",
+      "type": "boolean",
+      "default": false,
+      "help": "Off â†’ greedy (deterministic). On â†’ uses temperature / top_p / top_k."
+    },
+    {
+      "key": "temperature",
+      "label": "Temperature",
+      "type": "range",
+      "default": 0.7,
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "help": "Higher = more creative. Only applies when Sample is on."
+    },
+    {
+      "key": "top_p",
+      "label": "Top-p",
+      "type": "range",
+      "default": 0.95,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "help": "Nucleus sampling. Only applies when Sample is on."
+    },
+    {
+      "key": "top_k",
+      "label": "Top-k",
+      "type": "number",
+      "default": 50,
+      "min": 0,
+      "max": 200,
+      "step": 1,
+      "help": "0 disables top-k. Only applies when Sample is on."
+    }
+  ],
+  "feature-extraction": [
+    {
+      "key": "normalize",
+      "label": "Normalize (unit length)",
+      "type": "boolean",
+      "default": true,
+      "help": "L2-normalize the vector so cosine similarity is a plain dot product. Cosine similarity then reduces to a plain dot product."
+    },
+    {
+      "key": "dimensions",
+      "label": "Dimensions",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 4096,
+      "step": 1,
+      "help": "Truncate to the first N dimensions (Matryoshka models like nomic-embed / text-embedding-3). 0 = full size."
+    }
+  ],
+  "sentence-similarity": [
+    {
+      "key": "normalize",
+      "label": "Normalize (unit length)",
+      "type": "boolean",
+      "default": true,
+      "help": "L2-normalize the vector so cosine similarity is a plain dot product. Cosine similarity then reduces to a plain dot product."
+    },
+    {
+      "key": "dimensions",
+      "label": "Dimensions",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 4096,
+      "step": 1,
+      "help": "Truncate to the first N dimensions (Matryoshka models like nomic-embed / text-embedding-3). 0 = full size."
+    }
+  ],
+  "inpainting": [
+    {
+      "key": "strength",
+      "label": "Strength",
+      "type": "range",
+      "default": 0.8,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "help": "How much to transform: 0 = original image unchanged, 1 = fully regenerated from prompt."
+    },
+    {
+      "key": "num_inference_steps",
+      "label": "Inference steps",
+      "type": "number",
+      "default": 20,
+      "min": 1,
+      "max": 100,
+      "step": 1,
+      "help": "More steps â†’ higher quality, linearly slower."
+    },
+    {
+      "key": "guidance_scale",
+      "label": "Guidance scale",
+      "type": "range",
+      "default": 7.5,
+      "min": 0,
+      "max": 20,
+      "step": 0.5,
+      "help": "Classifier-free guidance. Higher = stricter prompt adherence."
+    },
+    {
+      "key": "negative_prompt",
+      "label": "Negative prompt",
+      "type": "text",
+      "default": "",
+      "help": "Things to steer AWAY from."
+    },
+    {
+      "key": "seed",
+      "label": "Seed",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 4294967295,
+      "step": 1,
+      "help": "Use the same seed and parameters to reproduce a run on the same runtime."
+    }
+  ]
+}

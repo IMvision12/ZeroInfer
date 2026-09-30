@@ -58,15 +58,15 @@ async def list_models():
                      "feature-extraction", "sentence-similarity",
                      "automatic-speech-recognition", "text-to-speech",
                      "object-detection", "zero-shot-object-detection",
-                     "image-segmentation", "mask-generation", "text-to-image")
+                     "image-segmentation", "mask-generation", "text-to-image",
+                     "image-to-text", "image-text-to-text", "document-question-answering",
+                     "image-classification", "zero-shot-image-classification", "depth-estimation",
+                     "image-to-image", "inpainting", "translation", "summarization")
         for mid, meta in list_installed().items():
             if (meta or {}).get("task") in _servable and mid not in ids:
                 ids.append(mid)
     except Exception:
         pass
-    from api.embeddings import DEFAULT_EMBED_MODEL
-    if DEFAULT_EMBED_MODEL not in ids:
-        ids.append(DEFAULT_EMBED_MODEL)
     created = _now()
     return {
         "object": "list",
@@ -125,13 +125,26 @@ async def embeddings(payload: dict = Body(...)):
 # ENGINE.run() - same code path as the UI workspaces - and only shape HTTP here.
 
 async def _media_run(model_req, tasks: tuple, fallback, inputs: dict, params: dict,
-                     task_hint: str | None = None):
+                     task_hint: str | None = None, job=None):
     """Resolve `model`, run one inference behind the shared lock, and return
     (model_id, output_kinds dict). Raises; callers map errors via _media_err."""
     mid = resolve_media_model(model_req, tasks, fallback)
     hint = installed_task(mid) or task_hint
+    if hint and hint not in tasks:
+        aliases = {"image-to-text", "image-text-to-text"}
+        if not {hint, task_hint} <= aliases:
+            raise ValueError(f"Model {mid} is installed for {hint}, not {task_hint}")
     eng = deps.engine()
     async with deps.INFERENCE_LOCK:
+        if job is not None:
+            if job["cancel_requested"]:
+                raise asyncio.CancelledError
+            job["status"] = "running"
+            job["progress"] = {"stage": "inference", "completed": 0, "total": None}
+            loop = asyncio.get_running_loop()
+            def progress(completed, total):
+                loop.call_soon_threadsafe(job.update, {"progress": {"stage": "inference", "completed": completed, "total": total}})
+            params = {**params, "_progress": progress}
         deps.clear_stop()
         out = await deps.run_blocking(eng.run, mid, hint, inputs, params)
     # Every media result an outside caller ever gets passes through here, which
@@ -172,6 +185,9 @@ async def audio_transcriptions(
     …). `language`/`prompt`/`temperature` are accepted for SDK compatibility but
     not forwarded - the ASR task doesn't take them."""
     fmt = (response_format or "json").strip().lower()
+    if language is not None or prompt is not None or temperature is not None:
+        return JSONResponse(status_code=400, content=_err(
+            "language, prompt, and temperature are not supported by this transcription endpoint.", "invalid_request_error"))
     if fmt not in ("json", "text", "verbose_json"):
         return JSONResponse(status_code=400, content=_err(
             f"response_format {fmt!r} is not supported - use json, text, or verbose_json.",
@@ -183,7 +199,7 @@ async def audio_transcriptions(
     try:
         mid, out = await _media_run(
             model, ("automatic-speech-recognition",), "openai/whisper-tiny",
-            {"dataUrl": bytes_to_data_url(raw, mime)}, {},
+            {"dataUrl": bytes_to_data_url(raw, mime)}, {"return_timestamps": fmt == "verbose_json"},
             task_hint="automatic-speech-recognition")
     except Exception as e:
         return _media_err(e)
@@ -192,8 +208,9 @@ async def audio_transcriptions(
         return PlainTextResponse(text)
     if fmt == "verbose_json":
         return {"task": "transcribe", "language": language or "",
-                "duration": _audio_duration_s(raw), "text": text, "segments": []}
-    return {"text": text}
+                "duration": _audio_duration_s(raw), "text": text, "segments": out.get("segments", []),
+                "model": mid}
+    return {"text": text, "model": mid}
 
 # Arbitrary-but-stable mapping of OpenAI voice names onto CMU-Arctic x-vector
 # speaker indices (SpeechT5 only; other TTS models ignore speaker_index).
@@ -202,8 +219,11 @@ _NAMED_VOICES = {"alloy": 7306, "echo": 6799, "fable": 6671,
 
 @router.post("/audio/speech")
 async def audio_speech(payload: dict = Body(...)):
-    """OpenAI-compatible text-to-speech. Always returns WAV bytes (no local
-    mp3/opus transcoder), whatever `response_format` asks for."""
+    """OpenAI-compatible text-to-speech. WAV output only; unsupported options are rejected."""
+    if payload.get("response_format", "wav") != "wav":
+        return JSONResponse(status_code=400, content=_err("Only WAV output is supported.", "invalid_request_error"))
+    if payload.get("speed", 1) != 1:
+        return JSONResponse(status_code=400, content=_err("Speech speed control is not supported.", "invalid_request_error"))
     text = str(payload.get("input") or "").strip()
     if not text:
         return JSONResponse(status_code=400, content=_err("`input` is required.", "invalid_request_error"))
@@ -213,9 +233,14 @@ async def audio_speech(payload: dict = Body(...)):
         params["speaker_index"] = int(v)
     elif v in _NAMED_VOICES:
         params["speaker_index"] = _NAMED_VOICES[v]
+    elif v:
+        return JSONResponse(status_code=400, content=_err("Unknown voice. Use a supported voice name or speaker index.", "invalid_request_error"))
     try:
+        selected = resolve_media_model(payload.get("model"), ("text-to-speech",), "microsoft/speecht5_tts")
+        if v and "speecht5" not in selected.lower():
+            raise ValueError("Voice selection is currently supported only for SpeechT5 models; omit voice for this model.")
         mid, out = await _media_run(
-            payload.get("model"), ("text-to-speech",), "microsoft/speecht5_tts",
+            selected, ("text-to-speech",), "microsoft/speecht5_tts",
             {"text": text}, params, task_hint="text-to-speech")
     except Exception as e:
         return _media_err(e)
@@ -232,11 +257,16 @@ async def image_detection(payload: dict = Body(...)):
     if labels is not None and (not isinstance(labels, list) or not all(isinstance(x, str) for x in labels)):
         return JSONResponse(status_code=400, content=_err("`labels` must be an array of strings.", "invalid_request_error"))
     params: dict = {}
-    if payload.get("threshold") is not None:
-        params["threshold"] = float(payload["threshold"])
-    if payload.get("nms_iou") is not None:
-        params["nms_iou"] = float(payload["nms_iou"])
     try:
+        import math
+        for key in ("threshold", "nms_iou"):
+            if payload.get(key) is not None:
+                if isinstance(payload[key], bool) or not isinstance(payload[key], (int, float)):
+                    raise ValueError(f"{key} must be a number")
+                value = float(payload[key])
+                if not math.isfinite(value) or not 0 <= value <= 1:
+                    raise ValueError(f"{key} must be between 0 and 1")
+                params[key] = value
         inputs = {"dataUrl": to_image_data_url(payload.get("image"))}
         if labels:
             params["candidate_labels"] = [s.strip() for s in labels if s.strip()]
@@ -265,10 +295,19 @@ async def image_segmentation(payload: dict = Body(...)):
     model, e.g. SegFormer / Mask2Former) and SAM auto-mask generation. Returns
     an RGBA overlay PNG (data URL) + a legend."""
     params = {k: payload[k] for k in
-              ("overlay_alpha", "legend_min_pct", "points_per_batch", "min_mask_pct", "max_masks")
+              ("overlay_alpha", "legend_min_pct", "points_per_batch", "min_mask_pct", "max_masks", "oneformer_mode", "export_masks")
               if payload.get(k) is not None}
     try:
+        from capabilities import PARAMETERS, validate_params
+        for key, value in params.items():
+            task = next(t for t in ("image-segmentation", "mask-generation") if key in {p["key"] for p in PARAMETERS[t]})
+            validate_params(task, {key: value})
         inputs = {"dataUrl": to_image_data_url(payload.get("image"))}
+        if payload.get("points"):
+            points = payload["points"]
+            if not isinstance(points, list) or len(points) > 256 or not all(isinstance(p, dict) and all(isinstance(p.get(k), (int, float)) and 0 <= p[k] <= 1 for k in ("x", "y")) and p.get("label", 1) in (0, 1) for p in points):
+                raise ValueError("points requires at most 256 normalized x/y coordinates with label 0 or 1")
+            inputs["points"] = payload["points"]
         mid, out = await _media_run(
             payload.get("model"), ("image-segmentation", "mask-generation"),
             "nvidia/segformer-b0-finetuned-ade-512-512",
@@ -276,7 +315,7 @@ async def image_segmentation(payload: dict = Body(...)):
     except Exception as e:
         return _media_err(e)
     return {"model": mid, "created": _now(),
-            "overlay": out.get("overlay"), "legend": out.get("legend") or []}
+            "overlay": out.get("overlay"), "legend": out.get("legend") or [], "masks": out.get("masks", [])}
 
 @router.post("/image/generation")
 @router.post("/images/generations")  # OpenAI-compatible alias
@@ -288,30 +327,55 @@ async def image_generation(payload: dict = Body(...)):
     prompt = str(payload.get("prompt") or "").strip()
     if not prompt:
         return JSONResponse(status_code=400, content=_err("`prompt` is required.", "invalid_request_error"))
-    n = max(1, min(int(payload.get("n") or 1), 4))
-    params: dict = dict(parse_size(payload.get("size")))
-    steps = payload.get("steps") or payload.get("num_inference_steps")
-    if steps:
-        params["num_inference_steps"] = int(steps)
-    if payload.get("guidance_scale") is not None:
-        params["guidance_scale"] = float(payload["guidance_scale"])
-    if payload.get("negative_prompt"):
-        params["negative_prompt"] = str(payload["negative_prompt"])
+    try:
+        n = int(payload.get("n", 1))
+        if not 1 <= n <= 4:
+            raise ValueError("n must be between 1 and 4")
+        seed = payload.get("seed")
+        if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**32):
+            raise ValueError("seed must be an integer between 0 and 4294967295")
+        if payload.get("response_format", "b64_json") != "b64_json":
+            raise ValueError("Only b64_json output is supported")
+    except (ValueError, TypeError) as exc:
+        return _media_err(ValueError(str(exc)))
+    try:
+        from capabilities import validate_params
+        params = {k: payload[k] for k in ("guidance_scale", "negative_prompt") if payload.get(k) is not None}
+        steps = payload.get("steps", payload.get("num_inference_steps"))
+        if steps is not None:
+            params["num_inference_steps"] = steps
+        validate_params("text-to-image", params)
+        dimensions = parse_size(payload.get("size"))
+        if payload.get("size") and not dimensions:
+            raise ValueError("size must be WIDTHxHEIGHT")
+        if any(v < 64 or v > 2048 or v % 8 for v in dimensions.values()):
+            raise ValueError("Image dimensions must be multiples of 8 between 64 and 2048")
+        params.update(dimensions)
+    except (ValueError, TypeError) as exc:
+        return _media_err(ValueError(str(exc)))
     data = []
     mid = None
     try:
-        for _ in range(n):
+        for i in range(n):
+            if seed is not None:
+                params["seed"] = (seed + i) % 2**32
             mid, out = await _media_run(
                 payload.get("model"), ("text-to-image",), None,
                 {"text": prompt}, params, task_hint="text-to-image")
             data.append({"b64_json": out["dataUrl"].split(",", 1)[1]})
     except Exception as e:
         return _media_err(e)
-    return {"created": _now(), "model": mid, "data": data}
+    return {"created": _now(), "model": mid, "data": data,
+            "seeds": [(seed + i) % 2**32 for i in range(n)] if seed is not None else None}
 
 @router.post("/chat/completions")
 async def chat_completions(payload: dict = Body(...)):
     messages = payload.get("messages") or []
+    from api.llm import normalize_messages
+    try:
+        normalize_messages(messages)
+    except (ValueError, TypeError, AttributeError) as exc:
+        return JSONResponse(status_code=400, content=_err(str(exc), "invalid_request_error"))
     stream = bool(payload.get("stream"))
     model_req = payload.get("model")
     tools = payload.get("tools")

@@ -54,6 +54,8 @@ def create_app() -> FastAPI:
     app = FastAPI(title="ZeroInfer API", docs_url=None, redoc_url=None)
 
     app.include_router(v1_router)
+    from api.task_routes import router as task_router
+    app.include_router(task_router)
 
     @app.get("/api/health")
     async def health():
@@ -117,11 +119,14 @@ def create_app() -> FastAPI:
         threading.Thread(target=worker, name=f"api-download-{model_id}", daemon=True).start()
 
         async def stream():
-            while True:
-                msg = await queue.get()
-                if msg.get("type") == "__done__":
-                    break
-                yield "data: " + json.dumps({"modelId": model_id, **msg}) + "\n\n"
+            try:
+                while True:
+                    msg = await queue.get()
+                    if msg.get("type") == "__done__":
+                        break
+                    yield "data: " + json.dumps({"modelId": model_id, **msg}) + "\n\n"
+            finally:
+                cancel.set()
 
         return StreamingResponse(stream(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

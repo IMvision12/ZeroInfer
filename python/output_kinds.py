@@ -53,7 +53,13 @@ def image(pil_image) -> dict:
 
 
 def audio(audio_array, sample_rate: int) -> dict:
-    return {"kind": "audio", "dataUrl": _encode_wav(audio_array, sample_rate)}
+    return {"kind": "audio", "dataUrl": _encode_wav(audio_array, sample_rate),
+            "sample_rate": sample_rate, "duration_seconds": len(audio_array) / sample_rate}
+
+
+def multimodal(*items: dict) -> dict:
+    """Ordered mixed outputs; existing single-kind adapters remain compatible."""
+    return {"kind": "multimodal", "items": list(items)}
 
 
 def vector(vec) -> dict:

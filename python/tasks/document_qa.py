@@ -35,8 +35,13 @@ class DocumentQAVariant(TaskVariant):
 
         result = state.pipe(image=img, question=question, **kwargs)
 
+        answers = result if isinstance(result, list) else [result] if isinstance(result, dict) else []
+        structured = [{k: r[k] for k in ("answer", "score", "start", "end") if k in r} for r in answers]
+        def answer(text):
+            return {**ok.text(text), "answers": structured}
+
         if isinstance(result, dict):
-            return ok.text(result.get("answer") or "")
+            return answer(result.get("answer") or "")
         if isinstance(result, list) and result:
             if top_k > 1:
                 lines = []
@@ -46,10 +51,10 @@ class DocumentQAVariant(TaskVariant):
                         continue
                     s = r.get("score")
                     lines.append(f"{a}    ({s:.2f})" if isinstance(s, (int, float)) else a)
-                return ok.text("\n".join(lines))
+                return answer("\n".join(lines))
             top = result[0]
-            return ok.text(top.get("answer") or "")
-        return ok.text("")
+            return answer(top.get("answer") or "")
+        return answer("")
 
 class DocumentQATask(TaskHandler):
     name = "document-question-answering"

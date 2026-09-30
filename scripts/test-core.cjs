@@ -18,7 +18,8 @@ test('personalization preserves history and excludes failed/interrupted turns', 
   assert.match(messages[0].content, /Alex/);
   assert.match(messages[0].content, /Be clear/);
   assert.equal(preferences.systemPrompt({ personalizationEnabled: false, customInstructions: 'Be clear' }), '');
-  assert.equal(preferences.normalize({ temperature: 0 }).temperature, 0);
+  assert.equal(preferences.normalize({ temperature: 0, maxNewTokens: 1024 }).temperature, undefined);
+  assert.equal(preferences.normalize({ maxNewTokens: 1024 }).maxNewTokens, undefined);
 });
 
 test('MCP setup quotes unusual paths and preserves separate desktop fields', () => {

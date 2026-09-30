@@ -93,6 +93,10 @@ class SegmentationVariant(TaskVariant):
         overlay, legend = _build_overlay(img, results, params)
         annotated = composite_masks(img, overlay)
         result = ok.masks(overlay, legend)
+        if params.get("export_masks"):
+            result["masks"] = [{"label": r.get("label"), "score": r.get("score"),
+                                "dataUrl": encode_png_data_url(r["mask"].convert("L"))}
+                               for r in results if r.get("mask") is not None]
         result["annotated"] = encode_png_data_url(annotated)
         return result
 
@@ -195,6 +199,10 @@ class OneFormerVariant(TaskVariant):
         overlay, legend = _build_overlay(img, results, params)
         annotated = composite_masks(img, overlay)
         result = ok.masks(overlay, legend)
+        if params.get("export_masks"):
+            result["masks"] = [{"label": r.get("label"), "score": r.get("score"),
+                                "dataUrl": encode_png_data_url(r["mask"].convert("L"))}
+                               for r in results if r.get("mask") is not None]
         result["annotated"] = encode_png_data_url(annotated)
         return result
 
