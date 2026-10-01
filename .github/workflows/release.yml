@@ -102,7 +102,7 @@ jobs:
         include:
           - os: windows-latest
             args: --win
-          - os: macos-latest      # arm64 runner; builds both mac arches
+          - os: macos-latest      # merges Apple Silicon and Intel into one universal app
             args: --mac
           - os: ubuntu-latest
             args: --linux
@@ -116,6 +116,10 @@ jobs:
 
       - run: npm ci
 
+      - name: Test installer asset selection offline
+        if: runner.os == 'Linux'
+        run: python3 scripts/test-installer.py
+
       # Compiles the React renderer to src/renderer/dist, which electron-builder
       # packs into the asar. main.js loads it from there with loadFile().
       - run: npm run build
@@ -124,6 +128,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder ${{ matrix.args }} --publish always
+
+      - name: Verify universal macOS binaries
+        if: runner.os == 'macOS'
+        run: node scripts/check-mac-universal.cjs
 
   # All three platforms uploaded - turn the draft into a real release. This is
   # also what finally creates the v<version> tag.
@@ -148,7 +156,7 @@ jobs:
           assets=$(gh release view "v$VERSION" --json assets --jq '.assets[].name')
           echo "$assets" | sed 's/^/  /'
           missing=0
-          for pattern in '\.exe$' '\.dmg$' '\.AppImage$' '\.deb$' '^latest\.yml$' '^latest-mac\.yml$' '^latest-linux\.yml$'; do
+          for pattern in '^ZeroInfer-Setup\.exe$' '^ZeroInfer\.dmg$' '^ZeroInfer\.zip$' '^ZeroInfer\.AppImage$' '^ZeroInfer\.deb$' '^latest\.yml$' '^latest-mac\.yml$' '^latest-linux\.yml$'; do
             if ! echo "$assets" | grep -qE "$pattern"; then
               echo "::error::Draft v$VERSION is missing an asset matching /$pattern/ - not publishing."
               missing=1

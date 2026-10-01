@@ -1,0 +1,2 @@
+# Shell installers must retain Unix line endings on every checkout.
+*.sh text eol=lf

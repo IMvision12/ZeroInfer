@@ -437,25 +437,10 @@ function resolveTaskMeta(task) {
   return TASK_META[task] || { nm: task || 'Run', input: 'text', output: 'text', icon: 'cube', accent: 'oklch(70% 0.10 250)' };
 }
 
-function titleForTask(meta, input) {
-  const verb = meta?.nm || 'Run';
-  if (!input) return verb;
-  if (input.kind === 'text') {
-    const text = (input.text || '').trim().replace(/\s+/g, ' ');
-    if (!text) return verb;
-    const snippet = text.length > 48 ? text.slice(0, 48).trimEnd() + '…' : text;
-    return `${verb}: ${snippet}`;
-  }
-
-  const promptText = (input.text || '').trim().replace(/\s+/g, ' ');
-  if (promptText) {
-    const s = promptText.length > 40 ? promptText.slice(0, 40).trimEnd() + '…' : promptText;
-    return `${verb}: ${s}`;
-  }
-  const raw = input.name || '';
-  const base = raw.replace(/\.[^./\\]+$/, '').replace(/[_\-]+/g, ' ').trim() || raw || 'input';
-  const short = base.length > 40 ? base.slice(0, 40).trimEnd() + '…' : base;
-  return `${verb} · ${short}`;
+function titleForTask(input) {
+  const text = (input?.text || '').trim().replace(/\s+/g, ' ');
+  if (text) return text.length > 48 ? text.slice(0, 48).trimEnd() + '…' : text;
+  return input?.name || 'New session';
 }
 
 const FLORENCE_TASKS = [
@@ -617,7 +602,7 @@ function FlorenceEmpty({ florenceTask, modelId, accent }) {
   );
 }
 
-function TaskWorkspace({ sessionId, modelId, modelMeta, onSaved }) {
+function TaskWorkspace({ sessionId, modelId, modelMeta, onSaved, onBack }) {
   const [session, setSession] = useStateTW(null);
   const [textInput, setTextInput] = useStateTW('');
   const [fileInput, setFileInput] = useStateTW(null); 
@@ -755,9 +740,10 @@ function TaskWorkspace({ sessionId, modelId, modelMeta, onSaved }) {
       ts: Date.now(),
     };
     const nextRuns = [...(session.runs || []), pending];
-    const title = session.title && session.title !== 'New session'
+    const isLegacyEmptyTitle = !(session.runs || []).length && session.title === modelId?.split('/').pop();
+    const title = session.title && session.title !== 'New session' && !isLegacyEmptyTitle
       ? session.title
-      : titleForTask(meta, input);
+      : titleForTask(input);
     const runningRun = { ...pending, status: 'running' };
     const nextSession = {
       ...session,
@@ -806,6 +792,7 @@ function TaskWorkspace({ sessionId, modelId, modelMeta, onSaved }) {
   return (
     <div className="tw">
       <div className="tw-head">
+        <button type="button" className="workspace-back" onClick={onBack} aria-label="Back to models" title="Back to models"><Icon name="arrow_left" size={16}/> Back</button>
         <div className="tw-tag" style={{color: meta.accent, borderColor: `color-mix(in oklab, ${meta.accent} 40%, transparent)`}}>{meta.nm}</div>
         <div className="tw-head-titles">
           <div className="chat-title">{session.title || 'New session'}</div>

@@ -210,7 +210,7 @@ function ModelHub({ hw, onOpenModel, onOpenSettings, defaultInstalled = false, r
         picks.push({ ...pick, size: finalSize });
         seen.add(pick.id);
       }
-      if (picks.length >= 7) break;
+      if (picks.length >= 5) break;
     }
     return picks;
   }, [suggestedPool, suggestedSizes, installed]);

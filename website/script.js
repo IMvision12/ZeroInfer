@@ -1,9 +1,5 @@
-// ZeroInfer landing page - interactions.
-//
-// ZeroInfer ships as a desktop app from GitHub Releases. This script resolves the
-// download buttons to the right asset for the visitor's OS, wires up the
-// copy-to-clipboard blocks (still used by the API code sample), highlights the
-// visitor's platform card, and runs the ambient scroll / hero effects.
+// Shared website interactions: clipboard controls and scroll effects.
+// Platform selection and download links live in download.js.
 
 // ── copy-to-clipboard for command + code blocks ──────────────────────────
 (function () {
@@ -58,135 +54,6 @@
   });
 })();
 
-// ── OS detection + direct download links.
-//
-// Clicking Download starts the download. It never lands the visitor on GitHub.
-//
-// The links point at GitHub's stable "latest asset" path, which 302s straight to
-// the newest build:
-//
-//   /releases/latest/download/ZeroInfer-Setup.exe
-//
-// There is deliberately NO GitHub API call here. The API is rate-limited (60
-// req/hr per IP) and returns 404 until the first release exists - either of which
-// used to knock every button back to the releases page. Because the artifact
-// names carry no version (see electron-builder.yml), these URLs can be hard-coded
-// and the platform cards work even with JavaScript disabled.
-(function () {
-  const REPO = 'ZeroAIx/ZeroInfer';
-  const DL = (file) => `https://github.com/${REPO}/releases/latest/download/${file}`;
-
-  const ASSET = {
-    win: 'ZeroInfer-Setup.exe',
-    macArm: 'ZeroInfer-arm64.dmg',
-    macIntel: 'ZeroInfer-x64.dmg',
-    linux: 'ZeroInfer.AppImage',
-  };
-
-  const ua = (navigator.userAgent || '').toLowerCase();
-  const plat = (navigator.platform || '').toLowerCase();
-  let os = 'windows';
-  if (ua.includes('mac') || plat.includes('mac')) os = 'mac';
-  else if (ua.includes('linux') || plat.includes('linux')) os = 'linux';
-
-  // Apple Silicon vs Intel. Handing an Intel Mac an arm64 build gives them an app
-  // that cannot run, so this needs to be right.
-  //
-  // The GPU string is the best signal available: every Apple Silicon Mac reports
-  // an Apple GPU, and no Intel Mac ever does (they ship Intel/AMD/Nvidia). It also
-  // beats userAgentData.architecture, which reports x86 for a browser running
-  // under Rosetta on an M-series machine - exactly the case we must not get wrong.
-  function isAppleSilicon() {
-    try {
-      const gl = document.createElement('canvas').getContext('webgl');
-      if (!gl) return null;
-      const dbg = gl.getExtension('WEBGL_debug_renderer_info');
-      const renderer = dbg
-        ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '')
-        : String(gl.getParameter(gl.RENDERER) || '');
-      if (!renderer) return null;
-      if (/apple/i.test(renderer)) return true;
-      if (/intel|amd|radeon|nvidia|geforce/i.test(renderer)) return false;
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
-  // Which macOS build to offer.
-  //
-  // The GPU check is only meaningful for a visitor who is ON a Mac. A Windows or
-  // Linux visitor clicking the macOS card has an Intel/AMD/Nvidia GPU that says
-  // nothing about the Mac they're downloading for - reading it would hand every
-  // one of them the Intel build. So only consult it on macOS; everyone else gets
-  // Apple Silicon, which is the large majority of Macs in use, and the Intel build
-  // is one visible link away.
-  const macIsIntel = () => os === 'mac' && isAppleSilicon() === false;
-  const macAsset = () => (macIsIntel() ? ASSET.macIntel : ASSET.macArm);
-
-  const forOs = {
-    windows: () => ASSET.win,
-    mac: macAsset,
-    linux: () => ASSET.linux,
-  };
-
-  // Platform cards. They state what each platform gets; they are not links and nothing
-  // here gives them one. Downloading is the hero button's job (and the links below the
-  // cards), so a Windows visitor can't click the macOS card and land a .dmg they can't open.
-  const KEY = { windows: 'win', mac: 'mac', linux: 'linux' };
-
-  // Hero button: point it at this visitor's build and say which one it is.
-  const hero = document.getElementById('hero-dl');
-  const label = document.getElementById('hero-dl-label');
-  if (hero) hero.href = DL(forOs[os]());
-  if (label) {
-    label.textContent =
-      os === 'windows' ? 'Download for Windows'
-      : os === 'linux' ? 'Download for Linux'
-      : macIsIntel()   ? 'Download for macOS (Intel)'
-      : 'Download for macOS';
-  }
-
-  // ── Compatibility bridge for releases built before the filenames dropped their
-  // version (v2.0.0 shipped `ZeroInfer-Setup-2.0.0.exe`, which the stable URL above
-  // cannot name). Ask the API what the newest release actually contains and match
-  // by pattern, so the button works regardless of which naming scheme is live.
-  //
-  // This is an upgrade, never a downgrade: if the API is rate-limited, offline, or
-  // returns nothing, the hard-coded link above stands and the button still works.
-  const MATCH = {
-    win: /\.exe$/i,
-    linux: /\.AppImage$/i,
-    macArm: /arm64\.dmg$/i,
-    macIntel: /(x64|x86_64|intel)\.dmg$/i,
-  };
-  const findAsset = (assets, re) => {
-    const hit = assets.find((a) => re.test(a.name || '') && !/\.blockmap$/i.test(a.name || ''));
-    return hit && hit.browser_download_url;
-  };
-
-  fetch(`https://api.github.com/repos/${REPO}/releases/latest`)
-    .then((r) => (r.ok ? r.json() : Promise.reject(new Error('no release'))))
-    .then((rel) => {
-      const assets = rel.assets || [];
-      const key = os === 'mac' ? (macIsIntel() ? 'macIntel' : 'macArm') : KEY[os];
-      const heroUrl = findAsset(assets, MATCH[key]);
-      if (hero && heroUrl) hero.href = heroUrl;
-    })
-    .catch(() => { /* keep the hard-coded stable URL */ });
-
-  // The hero command ships as the curl/sh line; Windows visitors get PowerShell.
-  if (os === 'windows') {
-    const ps = 'irm https://zeroinfer.vercel.app/install.ps1 | iex';
-    const cmd = document.getElementById('hero-cmd');
-    const text = document.getElementById('hero-cmd-text');
-    const prompt = document.getElementById('hero-cmd-prompt');
-    if (cmd) cmd.setAttribute('data-copy', ps);
-    if (text) text.textContent = ps;
-    if (prompt) prompt.textContent = '>';
-  }
-})();
-
 // Toggle nav border on scroll for subtle separation.
 (function () {
   const nav = document.querySelector('.nav');
@@ -201,6 +68,7 @@
 
 // Fade-in-on-scroll with staggered delay per card in a grid.
 (function () {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return;
   const io = new IntersectionObserver(
     (entries) => {
       for (const e of entries) {
@@ -221,7 +89,7 @@
     io.observe(el);
   });
   // Grid reveals with stagger
-  ['.feat-grid', '.model-families', '.downloads', '.oneliners', '.api-points', '.mcp-tools'].forEach((gridSel) => {
+  ['.feat-grid', '.model-families', '.api-points', '.mcp-tools'].forEach((gridSel) => {
     const cards = document.querySelectorAll(`${gridSel} > *`);
     cards.forEach((el, i) => {
       el.style.opacity = '0';
@@ -232,43 +100,3 @@
   });
 })();
 
-// Populate the constellation-particle field in the hero background.
-(function () {
-  const host = document.getElementById('hero-stars');
-  if (!host) return;
-  const COUNT = 24;
-  for (let i = 0; i < COUNT; i++) {
-    const s = document.createElement('span');
-    s.style.top = (Math.random() * 100) + '%';
-    s.style.left = (Math.random() * 100) + '%';
-    s.style.animationDelay = (Math.random() * 6) + 's';
-    s.style.animationDuration = (4 + Math.random() * 5) + 's';
-    s.style.width = s.style.height = (1.5 + Math.random() * 2.5) + 'px';
-    host.appendChild(s);
-  }
-})();
-
-// Mouse-follow halo on feature cards - reads cursor position, pipes to CSS var.
-(function () {
-  const cards = document.querySelectorAll('.feat');
-  cards.forEach((card) => {
-    card.addEventListener('mousemove', (e) => {
-      const r = card.getBoundingClientRect();
-      card.style.setProperty('--mx', ((e.clientX - r.left) / r.width * 100) + '%');
-      card.style.setProperty('--my', ((e.clientY - r.top) / r.height * 100) + '%');
-    });
-  });
-})();
-
-// Subtle parallax on hero aurora - shifts with mouse (2-3px max).
-(function () {
-  const aurora = document.querySelector('.hero-aurora');
-  const stars = document.getElementById('hero-stars');
-  if (!aurora) return;
-  document.addEventListener('mousemove', (e) => {
-    const x = (e.clientX / window.innerWidth - 0.5) * 14;
-    const y = (e.clientY / window.innerHeight - 0.5) * 14;
-    aurora.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-    if (stars) stars.style.transform = `translate3d(${x * 0.5}px, ${y * 0.5}px, 0)`;
-  });
-})();

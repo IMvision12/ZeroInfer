@@ -37,6 +37,9 @@ app.whenReady().then(async () => {
   await input('[aria-label="Theme"]', 'dark');
   await click('Save changes');
   await waitFor(`window.__test.snapshot().settings.theme === 'dark'`);
+  assert.match(await js('getComputedStyle(document.body).fontFamily'), /Segoe UI/, 'Desktop must use the shared system font');
+  assert.equal(await js(`getComputedStyle(document.querySelector('.main')).backgroundColor`), 'rgb(33, 33, 33)', 'Desktop must use the charcoal workspace');
+  assert.equal(await js(`getComputedStyle(document.querySelector('.hub')).backgroundColor`), 'rgb(33, 33, 33)', 'Home must use the shared canvas');
   await click('Personalization', '.settings-nav-item');
   await input('[aria-label="Custom instructions"]', 'Use clear explanations and practical examples. Keep responses focused.');
   await input('#settings-nickname', 'Alex');
@@ -94,10 +97,29 @@ app.whenReady().then(async () => {
   await input('[aria-label="Theme"]', 'light'); await click('Save changes');
   await shot('settings-general-light'); await checkLayout();
   await input('[aria-label="Theme"]', 'dark'); await click('Save changes');
+  await shot('settings-general-dark');
   win.setSize(940, 640); await pause(); await checkLayout(); await shot('settings-compact');
   win.setSize(1280, 900); await pause();
   await js(`document.querySelector('[aria-label="Close settings"]').click()`); await pause();
   await shot('home');
+  // A realistic suggestions list must scroll all the way past the final row.
+  assert.equal(await js(`document.querySelectorAll('.hub-landing-col:last-child .hub-landing-row').length`), 5, 'Show at most five recommendations');
+  for (const [width, height] of [[1280, 700], [940, 640]]) {
+    win.setSize(width, height); await pause();
+    const scroll = await js(`(() => {
+      const hub = document.querySelector('.hub-idle');
+      hub.scrollTop = hub.scrollHeight;
+      const last = document.querySelector('.hub-landing-col:last-child .hub-landing-row:last-child').getBoundingClientRect();
+      const bounds = hub.getBoundingClientRect();
+      return { overflow: getComputedStyle(hub).overflowY, top: hub.scrollTop, visible: last.top >= bounds.top && last.bottom <= bounds.bottom - 16 && bounds.bottom <= innerHeight };
+    })()`);
+    assert.equal(scroll.overflow, 'auto', 'Home must allow mouse-wheel scrolling');
+    assert.ok(scroll.top > 0, 'Long model lists must scroll');
+    assert.equal(scroll.visible, true, `Last model must fit above bottom padding at ${width}x${height}`);
+  }
+  await shot('home-scrolled-bottom');
+  win.setSize(1280, 900); await pause();
+  await js(`document.querySelector('.hub-idle').scrollTop = 0`);
   await js(`window.__test.fail('download', 'Temporary connection failure'); document.querySelectorAll('.hub-landing-col')[1].querySelector('.hub-landing-row').click()`);
   await waitFor(`!!document.querySelector('.hub-landing-row-err')`);
   await js(`window.__test.fail('download', ''); document.querySelectorAll('.hub-landing-col')[1].querySelector('.hub-landing-row').click()`);
@@ -131,6 +153,45 @@ app.whenReady().then(async () => {
   assert.equal((await js('window.__test.snapshot()')).chat.params.max_new_tokens, 768);
   await js(`document.querySelector('.chat-composer .tw-params').open = false`);
   await shot('chat');
+  await js(`window.zeroinfer.chats.patch('c-test', { title: 'hi' })`); await pause();
+  assert.equal(await js(`document.querySelector('.chat-item .t1').textContent.trim()`), 'hi');
+  assert.equal(await js(`document.querySelector('.chat-item-model').textContent`), 'Qwen3-0.6B');
+  assert.equal(await js(`document.querySelector('.chat-item-model').title`), 'Qwen/Qwen3-0.6B');
+  assert.equal(await js(`document.querySelector('.chat-item-task') === null`), true);
+  await shot('recent-session-model');
+  const savedChat = (await js('window.__test.snapshot()')).chat;
+  await js(`document.querySelector('[aria-label="Back to models"]').click()`);
+  await waitFor(`!!document.querySelector('.model-card')`);
+  assert.equal(await js(`document.querySelector('.new-chat-btn.active').textContent.trim()`), 'My models');
+  assert.deepEqual((await js('window.__test.snapshot()')).chat, savedChat, 'Back must preserve saved conversation');
+  await js(`window.zeroinfer.chats.save({ id: 'detection-test', title: 'Detection example', kind: 'task', task: 'object-detection', modelId: 'facebook/detr-resnet-50', runs: [], createdAt: Date.now(), updatedAt: Date.now() })`);
+  await pause();
+  await js(`document.querySelector('.chat-item').click()`);
+  await waitFor(`!!document.querySelector('.tw-head .workspace-back')`);
+  await shot('inference-back');
+  await js(`document.querySelector('[aria-label="Back to models"]').click()`);
+  await waitFor(`!!document.querySelector('.model-card')`);
+  assert.equal((await js('window.__test.snapshot()')).chat.id, 'detection-test');
+  for (const [task, modelId, filename] of [
+    ['object-detection', 'facebook/detr-resnet-50', 'pets.jpg'],
+    ['mask-generation', 'facebook/sam-vit-base', 'zebras.png'],
+    ['automatic-speech-recognition', 'openai/whisper-small', 'meeting.wav'],
+  ]) {
+    await js(`window.zeroinfer.chats.save(${JSON.stringify({ id: task, title: 'New session', kind: 'task', task, modelId, runs: [] })})`);
+    await pause();
+    await js(`document.querySelector('.chat-item').click()`);
+    await waitFor(`!!document.querySelector('.tw-input-panel')`);
+    assert.equal(await js(`document.querySelector('.chat-item .t1').textContent.trim()`), 'New session');
+    await js(`document.querySelector('.tw-input-panel').click()`); await pause();
+    await js(`document.querySelector('.tw .cc-send').click()`);
+    await waitFor(`window.__test.snapshot().chat.runs?.[0]?.status === 'done'`);
+    assert.equal((await js('window.__test.snapshot()')).chat.title, filename);
+    assert.equal(await js(`document.querySelector('.chat-item .t1').textContent.trim()`), filename);
+    assert.equal(await js(`document.querySelector('.chat-item-model').textContent`), modelId.split('/').pop());
+    assert.equal(await js(`document.querySelector('.chat-item-task') === null`), true);
+    await js(`document.querySelector('[aria-label="Back to models"]').click()`);
+    await waitFor(`!!document.querySelector('.model-card')`);
+  }
   assert.deepEqual(errors, [], 'Renderer console must have no errors');
   console.log('PASS: settings persistence, error states, API port, ChatGPT MCP setup, clipboard feedback, unload, export, keyboard cancellation, token errors, responsive layout, download retry, offline library, chat save recovery and history.');
   console.log(`Screenshots: ${output}`);

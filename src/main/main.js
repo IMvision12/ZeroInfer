@@ -108,7 +108,7 @@ function createWindow() {
     minWidth: 940,
     minHeight: 640,
     show: false,
-    backgroundColor: '#0b0d12',
+    backgroundColor: '#212121',
     title: 'ZeroInfer',
     // Needed for the title bar and taskbar in dev: electron-builder's `win.icon`
     // only stamps the packaged .exe, so `npm start` otherwise shows Electron's

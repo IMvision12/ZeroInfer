@@ -1,21 +1,22 @@
 <!doctype html>
 <meta charset="utf-8" />
 <title>ZeroInfer</title>
+<link rel="stylesheet" href="theme.css" />
 <style>
   :root {
-    --bg: #0b0d12;
-    --panel: #12151d;
-    --border: #232838;
-    --text: #e6e9f0;
-    --muted: #8b93a7;
-    --accent: #6d8cff;
-    --danger: #ff6b6b;
+    --bg: var(--zi-workspace);
+    --panel: var(--zi-surface);
+    --border: var(--zi-border);
+    --text: var(--zi-text);
+    --muted: var(--zi-muted);
+    --accent: var(--zi-accent);
+    --danger: var(--zi-danger);
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center;
     background: var(--bg); color: var(--text);
-    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 14px/1.55 var(--zi-sans);
     -webkit-user-select: none; user-select: none;
   }
   .wrap { width: 560px; max-width: calc(100vw - 64px); }
@@ -42,7 +43,7 @@
   .log {
     margin-top: 18px; height: 132px; overflow: auto; padding: 10px 12px;
     background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font: 11px/1.5 var(--zi-mono);
     color: var(--muted); white-space: pre-wrap; word-break: break-all;
     -webkit-user-select: text; user-select: text;
   }
@@ -56,8 +57,8 @@
   .card p  { text-align: center; }
   .hint {
     margin-top: 16px; padding: 10px 12px; border-radius: 9px;
-    background: #0e111a; border: 1px solid var(--border);
-    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--zi-sidebar); border: 1px solid var(--border);
+    font: 12px/1.5 var(--zi-mono);
     color: var(--muted); text-align: left;
     -webkit-user-select: text; user-select: text;
   }
@@ -67,14 +68,14 @@
     padding: 9px 18px; border-radius: 9px; cursor: pointer;
     border: 1px solid var(--border); background: transparent; color: var(--text);
   }
-  button:hover { border-color: #36405c; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:hover { border-color: var(--zi-border-strong); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--zi-canvas); }
   button.primary:hover { filter: brightness(1.08); }
   .err { color: var(--danger); }
   .mono-err {
     margin-top: 14px; max-height: 180px; overflow: auto; padding: 10px 12px;
-    background: #0e111a; border: 1px solid var(--border); border-radius: 9px;
-    font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--zi-sidebar); border: 1px solid var(--border); border-radius: 9px;
+    font: 11px/1.5 var(--zi-mono);
     color: var(--muted); white-space: pre-wrap; text-align: left; word-break: break-all;
     -webkit-user-select: text; user-select: text;
   }

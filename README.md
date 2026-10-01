@@ -27,10 +27,9 @@ it. Prefer to click? Download it from the
 
 | Platform | File |
 | --- | --- |
-| Windows | `ZeroInfer-Setup-<version>.exe` |
-| macOS (Apple Silicon) | `ZeroInfer-<version>-arm64.dmg` |
-| macOS (Intel) | `ZeroInfer-<version>-x64.dmg` |
-| Linux | `ZeroInfer-<version>.AppImage` or `.deb` |
+| Windows | `ZeroInfer-Setup.exe` |
+| macOS (Apple Silicon & Intel) | `ZeroInfer.dmg` (universal) |
+| Linux (x64) | `ZeroInfer.AppImage` or `ZeroInfer.deb` |
 
 > The builds are not code-signed yet. Downloaded in a browser, Windows
 > SmartScreen will say "unknown publisher" (More info → Run anyway) and macOS

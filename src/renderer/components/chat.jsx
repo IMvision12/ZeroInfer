@@ -47,7 +47,7 @@ function JanusModeBar({ value, onChange }) {
   );
 }
 
-function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved, preferences = ZeroPreferences.defaults }) {
+function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved, onBack, preferences = ZeroPreferences.defaults }) {
   const [chat, setChat] = useStateCH(null);
   const [input, setInput] = useStateCH('');
   const [atts, setAtts] = useStateCH([]);
@@ -269,6 +269,7 @@ function ChatWorkspace({ sessionId, modelId, modelMeta, onSaved, preferences = Z
   return (
     <div className="chat-view">
       <div className="chat-head">
+        <button type="button" className="workspace-back" onClick={onBack} aria-label="Back to models" title="Back to models"><Icon name="arrow_left" size={16}/> Back</button>
         <div className="chat-head-titles">
           <div className="chat-title">{chat.title || 'New chat'}</div>
           <div className="chat-sub">{modelId} · {visibleMessages.length} msg{visibleMessages.length === 1 ? '' : 's'}</div>

@@ -43,7 +43,7 @@ function create() {
     minWidth: 420,
     minHeight: 360,
     show: false,
-    backgroundColor: '#0b0d12',
+    backgroundColor: '#212121',
     title: 'ZeroInfer - Output',
     ...(appIcon() ? { icon: appIcon() } : {}),
     autoHideMenuBar: true,

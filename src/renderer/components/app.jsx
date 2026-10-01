@@ -273,6 +273,7 @@ function App() {
     setHubResetSignal(n => n + 1);
   };
   const openHubInstalled = () => { setView('hub'); setActiveSession(null); setHubInstalledMode(true); };
+  const backToModels = () => { setView('hub'); setActiveSession(null); };
   const openSession = (id) => { setView('session'); setActiveSession(id); };
   const startSessionWithModel = async (modelId) => {
 
@@ -283,7 +284,7 @@ function App() {
     const id = 'c-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
     const session = {
       id,
-      title: modelId.split('/').pop(),
+      title: 'New session',
       kind,
       modelId,
       task,
@@ -314,7 +315,7 @@ function App() {
       return <ModelHub hw={hw} onOpenModel={startSessionWithModel} onOpenSettings={openSettings} defaultInstalled={hubInstalledMode} resetSignal={hubResetSignal}/>;
     }
     if (view === 'session' && activeSessionObj) {
-      return renderWorkspace(activeSessionObj, installedModels, () => {}, preferences);
+      return renderWorkspace(activeSessionObj, installedModels, () => {}, preferences, backToModels);
     }
     return (
       <Landing
@@ -412,11 +413,11 @@ function App() {
                   <span>Update · v{String(updateInfo.latestVersion || '').replace(/^v/i, '')}</span>
                 </button>
               )}
-              {preferences.showHardware && <div className="side-stats mono" title={hw?.gpu?.model || ''}>
-                {sbGpu(hw) && <span>GPU {sbGpu(hw)}</span>}
-                <span>RAM {sbRam(hw)}</span>
-                <span>CPU {sbCpu(hw)}</span>
-              </div>}
+              {preferences.showHardware && <dl className="side-stats" aria-label="Hardware usage">
+                {sbGpu(hw) && <div className="side-stat" title={hw?.gpu?.model || ''}><dt>GPU</dt><dd>{sbGpu(hw)}</dd></div>}
+                <div className="side-stat"><dt>RAM</dt><dd>{sbRam(hw)}</dd></div>
+                <div className="side-stat"><dt>CPU</dt><dd>{sbCpu(hw)}</dd></div>
+              </dl>}
               <button className="new-chat-btn" onClick={() => openSettings()} title="Settings">
                 <Icon name="settings" size={14}/> Settings
               </button>
@@ -461,7 +462,7 @@ function App() {
   );
 }
 
-function renderWorkspace(session, installedModels, onSaved, preferences) {
+function renderWorkspace(session, installedModels, onSaved, preferences, onBack) {
   const modelId = session.modelId || session.model;
   const installedMeta = (modelId && installedModels[modelId]) || null;
 
@@ -476,6 +477,7 @@ function renderWorkspace(session, installedModels, onSaved, preferences) {
   if (CHAT_TASKS.has(task) && !isFlorence) {
     return (
       <ChatWorkspace
+        onBack={onBack}
         preferences={preferences}
         key={session.id}
         sessionId={session.id}
@@ -487,6 +489,7 @@ function renderWorkspace(session, installedModels, onSaved, preferences) {
   }
   return (
     <TaskWorkspace
+      onBack={onBack}
       key={session.id}
       sessionId={session.id}
       modelId={modelId}
@@ -604,6 +607,8 @@ function timeGreeting() {
 }
 
 function ChatItem({ session, isActive, onOpen, onDeleted }) {
+  const modelId = session.modelId || session.model || '';
+  const modelName = typeof modelId === 'string' ? modelId.split('/').pop() : '';
   const { useState, useEffect, useRef } = React;
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
@@ -713,12 +718,10 @@ function ChatItem({ session, isActive, onOpen, onDeleted }) {
         ) : (
           <div className="t1">
             {session.pinned && <Icon name="pin" size={10} stroke={1.8} style={{marginRight:5,color:'var(--accent)',flexShrink:0}}/>}
-            <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{session.title || 'Untitled'}</span>
+            <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{session.title || 'New session'}</span>
           </div>
         )}
-        <div className="t2">
-          <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',minWidth:0}}>{prettyTask(session.task) || 'session'}</span>
-        </div>
+        {modelName && <div className="chat-item-model" title={modelId}>{modelName}</div>}
       </div>
 
       <button

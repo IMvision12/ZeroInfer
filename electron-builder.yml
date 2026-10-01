@@ -1,8 +1,8 @@
 # electron-builder: produce the installers published to GitHub Releases.
 #
-#   Windows  ZeroInfer-Setup-<v>.exe          (NSIS, x64)
-#   macOS    ZeroInfer-<v>-{arm64,x64}.dmg    (+ .zip, required by electron-updater)
-#   Linux    ZeroInfer-<v>.AppImage, .deb     (x64)
+#   Windows  ZeroInfer-Setup.exe          (NSIS, x64)
+#   macOS    ZeroInfer.dmg                (universal; .zip for electron-updater)
+#   Linux    ZeroInfer.AppImage, .deb     (x64)
 #
 # What ships inside: the Electron shell, the compiled renderer, and the `python/`
 # source tree (the engine + runner.py, which Electron drives over stdio). What
@@ -83,16 +83,16 @@ nsis:
 mac:
   target:
     - target: dmg
-      arch: [arm64, x64]
+      arch: [universal]
     - target: zip           # electron-updater cannot update from a .dmg alone
-      arch: [arm64, x64]
+      arch: [universal]
   icon: assets/logo.png
   category: public.app-category.developer-tools
   identity: null            # ad-hoc / unsigned until certs exist
-  artifactName: ${productName}-${arch}.${ext}        # ZeroInfer-arm64.zip
+  artifactName: ${productName}.${ext}                # ZeroInfer.zip (universal)
 
 dmg:
-  artifactName: ${productName}-${arch}.${ext}        # ZeroInfer-arm64.dmg
+  artifactName: ${productName}.${ext}                # ZeroInfer.dmg (universal)
 
 linux:
   target:

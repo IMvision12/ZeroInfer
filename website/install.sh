@@ -48,14 +48,15 @@ ARCH="$(uname -m)"
 case "$OS" in
   Darwin)
     case "$ARCH" in
-      arm64|aarch64) PATTERN="arm64.zip" ;;
-      x86_64)        PATTERN="x64.zip" ;;
+      arm64|aarch64) LEGACY_PATTERN='arm64\.zip$' ;;
+      x86_64)        LEGACY_PATTERN='x64\.zip$' ;;
       *)             die "Unsupported macOS architecture: $ARCH" ;;
     esac
+    PATTERN='/ZeroInfer\.zip$'
     ;;
   Linux)
     case "$ARCH" in
-      x86_64|amd64) PATTERN=".AppImage" ;;
+      x86_64|amd64) PATTERN='\.AppImage$' ;;
       *)            die "Unsupported Linux architecture: $ARCH (only x86_64 is built)." ;;
     esac
     ;;
@@ -68,11 +69,14 @@ info "Looking up the latest release"
 JSON="$(curl -fsSL -H 'User-Agent: zeroinfer-installer' "$API")" \
   || die "Could not reach GitHub."
 
-URL="$(printf '%s' "$JSON" \
+URLS="$(printf '%s' "$JSON" \
   | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' \
-  | sed 's/.*"\(https[^"]*\)".*/\1/' \
-  | grep -- "$PATTERN" \
-  | head -n 1)"
+  | sed 's/.*"\(https[^"]*\)".*/\1/')"
+URL="$(printf '%s\n' "$URLS" | grep -- "$PATTERN" | head -n 1)"
+# Support the existing release until the first universal build is published.
+if [ -z "$URL" ] && [ "$OS" = "Darwin" ]; then
+  URL="$(printf '%s\n' "$URLS" | grep -- "$LEGACY_PATTERN" | head -n 1)"
+fi
 
 [ -n "$URL" ] || die "The latest release has no asset matching '$PATTERN'."
 

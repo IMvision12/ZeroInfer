@@ -1,16 +1,17 @@
 <!doctype html>
 <meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:; media-src data:;" />
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:; media-src data:;" />
 <title>ZeroInfer - Output</title>
+<link rel="stylesheet" href="theme.css" />
 <style>
   :root {
-    --bg: #0b0d12;
-    --panel: #12151d;
-    --border: #232838;
-    --text: #e6e9f0;
-    --muted: #8b93a7;
-    --accent: #6d8cff;
+    --bg: var(--zi-workspace);
+    --panel: var(--zi-surface);
+    --border: var(--zi-border);
+    --text: var(--zi-text);
+    --muted: var(--zi-muted);
+    --accent: var(--zi-accent);
   }
   * { box-sizing: border-box; }
   body {
@@ -18,7 +19,7 @@
     min-height: 100vh;
     background: var(--bg);
     color: var(--text);
-    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 14px/1.55 var(--zi-sans);
   }
 
   header {
@@ -76,8 +77,8 @@
 
   pre.text {
     margin: 0; padding: 10px 12px; white-space: pre-wrap; word-break: break-word;
-    background: #0e111a; border: 1px solid var(--border); border-radius: 8px;
-    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--zi-sidebar); border: 1px solid var(--border); border-radius: 8px;
+    font: 12px/1.5 var(--zi-mono);
   }
 
   table.rows { width: 100%; border-collapse: collapse; font-size: 12px; }
