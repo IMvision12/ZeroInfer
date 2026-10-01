@@ -9,6 +9,42 @@ const { mcpClients } = require('../src/main/mcp-clients');
 const { writeMcpLauncher } = require('../src/main/mcp-setup');
 const { PythonRunner } = require('../src/main/python-runner');
 
+test('macOS release verification passes file before lipo architectures and propagates failures', () => {
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, 'check-mac-universal.cjs'), 'utf8');
+  function verify(failingBinary) {
+    const calls = [], artifacts = [], messages = [];
+    const context = {
+      __dirname, process: { platform: 'darwin' },
+      console: { log: message => messages.push(message) },
+      require: name => {
+        if (name === 'node:path') return path;
+        if (name === 'node:fs') return { statSync: file => { artifacts.push(path.basename(file)); return { isFile: () => true }; } };
+        if (name === 'node:child_process') return { execFileSync: (command, args) => {
+          assert.equal(command, 'lipo');
+          assert.ok(path.isAbsolute(args[0]), 'Input binary must come first');
+          assert.deepEqual(Array.from(args.slice(1)), ['-verify_arch', 'x86_64', 'arm64']);
+          calls.push(args[0]);
+          if (calls.length === failingBinary) throw new Error('Missing architecture');
+        } };
+        throw new Error(`Unexpected dependency: ${name}`);
+      },
+    };
+    return { run: () => vm.runInNewContext(source, context), calls, artifacts, messages };
+  }
+  const success = verify();
+  success.run();
+  assert.equal(success.calls.length, 2);
+  assert.ok(success.calls[1].endsWith('Electron Framework'));
+  assert.deepEqual(success.artifacts, ['ZeroInfer.dmg', 'ZeroInfer.zip', 'latest-mac.yml']);
+  assert.equal(success.messages.length, 1);
+  for (const binary of [1, 2]) {
+    const failure = verify(binary);
+    assert.throws(failure.run, /Missing architecture/);
+    assert.equal(failure.messages.length, 0, 'Failed verification must not report success');
+  }
+});
+
 test('personalization preserves history and excludes failed/interrupted turns', () => {
   const messages = preferences.chatMessages([
     { role: 'user', text: 'Remember blue' }, { role: 'assistant', text: 'OK' },

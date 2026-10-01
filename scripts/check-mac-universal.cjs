@@ -6,7 +6,8 @@ if (process.platform !== 'darwin') throw new Error('Universal binary verificatio
 const output = path.resolve(__dirname, '../dist-app');
 const app = path.join(output, 'mac-universal/ZeroInfer.app/Contents');
 for (const binary of ['MacOS/ZeroInfer', 'Frameworks/Electron Framework.framework/Versions/A/Electron Framework']) {
-  execFileSync('lipo', ['-verify_arch', 'x86_64', 'arm64', path.join(app, binary)], { stdio: 'inherit' });
+  // -verify_arch consumes all following arguments as architectures; put the file first.
+  execFileSync('lipo', [path.join(app, binary), '-verify_arch', 'x86_64', 'arm64'], { stdio: 'inherit' });
 }
 for (const file of ['ZeroInfer.dmg', 'ZeroInfer.zip', 'latest-mac.yml']) {
   if (!fs.statSync(path.join(output, file)).isFile()) throw new Error(`Missing macOS release artifact: ${file}`);
